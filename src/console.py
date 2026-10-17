@@ -9,13 +9,14 @@ import signal
 import subprocess
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, quote
 
 from procutil import creationflags, stop_process
 from runtime_config import rtsp_host, port
 from paths import install_root, engine_exe
+from console_security import ConsoleHTTPServer, Security
 RTSP_HOST = rtsp_host()
 PLAYER_IDLE_TIMEOUT = 150
 WEB = install_root() / 'web'
@@ -205,6 +206,25 @@ def ai_player(state, device, token):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def version_string(self):
+        return 'Tuya Local'
+
+    def end_headers(self):
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('X-Frame-Options', 'DENY')
+        self.send_header('Referrer-Policy', 'no-referrer')
+        self.send_header('Cross-Origin-Resource-Policy', 'same-origin')
+        self.send_header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+        super().end_headers()
+
+    def guard(self):
+        error = self.server.security.request_error(self)
+        if error:
+            self.json(error[0], {'error': error[1]})
+            return False
+        return True
+
     def log_message(self, *args):
         pass
 
@@ -218,8 +238,19 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
+        if not self.guard():
+            return
         path = urlparse(self.path).path
         try:
+            if path == '/api/health':
+                return self.json(200, {'service': 'tuya-local', 'localOnly': True})
+            if path == '/api/access':
+                return self.json(200, {'enabled': self.server.security.enabled, 'authenticated': self.server.security.authenticated(self.headers.get('Cookie'))})
+            public = {'/login.js', '/login.css', '/brand.svg', '/locales.json', '/i18n.js'}
+            if not self.server.security.authenticated(self.headers.get('Cookie')) and path not in public:
+                if path in {'/', '/index.html'}:
+                    return self.send_bytes((WEB / 'login.html').read_bytes(), 'text/html; charset=utf-8')
+                return self.json(401, {'error': 'Authentication required.'})
             if path in {'/api/ai/state','/api/ai/events'}:
                 devices = {cam['deviceId'] for cam in runtime.state().get('cameras', [])}
                 return self.json(200, ai_service().state(devices) if path.endswith('/state') else ai_service().events(devices))
@@ -235,7 +266,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_bytes(data, 'image/png')
             if path.startswith('/stream/') and path.endswith('.mp4'):
                 return self.stream(path.removeprefix('/stream/').removesuffix('.mp4'))
-            assets = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/settings.js': 'settings.js', '/ai.js': 'ai.js', '/webrtc.js': 'webrtc.js', '/display.js': 'display.js', '/recovery.js': 'recovery.js', '/app.css': 'app.css', '/i18n.js': 'i18n.js', '/locales.json': 'locales.json'}
+            from runtime_config import WEB_ASSETS
+            assets = {'/' + name: name for name in WEB_ASSETS}
+            assets['/'] = 'index.html'
             if path not in assets:
                 return self.json(404, {'error': 'Page introuvable.'})
             file = WEB / assets[path]
@@ -254,12 +287,14 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_POST(self):
-        # Same-origin only. A third-party website cannot send local control requests.
-        origin = self.headers.get('Origin')
-        if origin and urlparse(origin).netloc != self.headers.get('Host'):
-            return self.json(403, {'error': 'Origine non autorisée.'})
+        if not self.guard():
+            return
         try:
             path = urlparse(self.path).path
+            if self.headers.get('Transfer-Encoding') or len(self.headers.get_all('Content-Length', [])) != 1:
+                return self.json(400, {'error': 'A single Content-Length is required.'})
+            if self.headers.get_content_type() != 'application/json':
+                return self.json(415, {'error': 'Use application/json.'})
             size = int(self.headers.get('Content-Length', '0'))
             limit = 400000 if path == '/api/ai/analyze' else 65536
             if size < 0 or size > limit:
@@ -267,6 +302,30 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(size) or b'{}')
             if not isinstance(body, dict):
                 raise ValueError('Requête invalide.')
+            security = self.server.security
+            if path == '/api/access/login':
+                status, token = security.login(self.client_address[0], body.get('password'))
+                if token:
+                    self.send_response(200)
+                    self.send_header('Set-Cookie', security.cookie(token))
+                    self.send_header('Content-Length', '2')
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Cache-Control', 'no-store')
+                    self.end_headers()
+                    self.wfile.write(b'{}')
+                    return
+                return self.json(status, {'error': 'Too many attempts. Wait one minute.' if status == 429 else 'Incorrect password.'})
+            if not security.authenticated(self.headers.get('Cookie')):
+                return self.json(401, {'error': 'Authentication required.'})
+            if path == '/api/access/logout':
+                security.logout(self.headers.get('Cookie'))
+                self.send_response(200)
+                self.send_header('Set-Cookie', security.cookie(None))
+                self.send_header('Content-Length', '2')
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
+                self.wfile.write(b'{}')
+                return
             if path in {'/api/ai/config','/api/ai/analyze','/api/ai/events/clear'}:
                 if path.endswith('/clear'):
                     return self.json(200, ai_service().clear())
@@ -329,6 +388,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def main(stop_event=None):
     global runtime
+    if os.name != 'nt':
+        os.umask(0o077)
+    security = Security()
     from console_runtime import Runtime
     runtime = Runtime()
     runtime.start()
@@ -343,7 +405,7 @@ def main(stop_event=None):
             if _ai is not None:
                 _ai.cleanup()
     threading.Thread(target=reap, daemon=True).start()
-    server = ThreadingHTTPServer((os.environ.get('TUYA_HTTP_HOST','0.0.0.0'), port('TUYA_HTTP_PORT',8787)), Handler)
+    server = ConsoleHTTPServer((os.environ.get('TUYA_HTTP_HOST','127.0.0.1'), port('TUYA_HTTP_PORT',8787)), Handler, security)
     def shutdown(*_):
         threading.Thread(target=server.shutdown, daemon=True).start()
     if stop_event is not None:

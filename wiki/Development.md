@@ -23,3 +23,7 @@ go test -race ./pkg/rtsp ./pkg/webrtc ./pkg/tuya
 In `desktop/`, run `npm ci` and `npm run check` for Rust tests. Package builds run natively on each target OS after preparing the embedded server. `python scripts/test_desktop_server.py` exercises the actual frozen engine, decoder, models, API, assets and graceful shutdown with isolated empty account data.
 
 The old Tkinter GUI, bundled VLC, Inno Setup installers and legacy HLS/archive modes have been removed from the active tree. Licenses for retained code stay in the repository; Git history preserves the old implementation.
+
+## Documentation images
+
+Run `python scripts/preview_demo.py` to serve the actual interface at `http://127.0.0.1:18889/` and the access-page preview at port 18890. This uses two synthetic cameras and temporary AI storage. It never loads account data, contacts Tuya or opens camera media. Capture the English light/dark views through the browser; publish only these reviewed images in `wiki/images/`. The 18890 password is random and deliberately undisclosed: this view is for documenting the sign-in screen.

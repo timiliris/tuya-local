@@ -15,7 +15,23 @@ Account login, wake-up and signaling still use Tuya. Camera settings and PTZ may
 
 Camera VLANs must route the necessary traffic. An RTSP URL in a browser tab is not a substitute for a compatible player such as VLC.
 
-The server has no built-in web authentication. Do not expose it directly to the Internet. Use a trusted or protected private network for remote access and preserve private media-candidate routing. HTTPS alone does not solve WebRTC routing.
+## Web access protection (0.2.0)
+
+The web interface and API support an optional server password. To enable it, set `TUYA_ACCESS_PASSWORD` to a unique password of at least 12 characters in the private `.env` file and recreate the container. Do not put a password in a URL, command-line argument, issue, screenshot or Git commit. Protect `.env` with owner-only permissions.
+
+An alternative is `TUYA_ACCESS_PASSWORD_FILE`: mount a private file or Docker secret read-only and set this environment variable to its container path. The file takes precedence over the environment password. An invalid or unreadable configured secret stops startup; it does not silently disable authentication.
+
+![Server sign-in](https://raw.githubusercontent.com/timiliris/tuya-local/main/wiki/images/server-access.png)
+
+Sessions use random server-side tokens and HttpOnly, SameSite=Strict cookies. They expire after 12 hours and are invalidated on logout or server restart. Password verification uses scrypt; login attempts and session counts are bounded. Passwords and session tokens are never returned by the API. The public `/api/health` endpoint discloses only the service identifier and local-video policy.
+
+The password is optional for the default localhost installation. **It protects HTTP access, not direct RTSP clients such as VLC.** Keep RTSP bound to localhost or behind a trusted network/VPN. A web password does not encrypt HTTP: use HTTPS or a trusted VPN for another computer.
+
+For a DNS hostname, explicitly list it in `TUYA_ALLOWED_HOSTS` (comma-separated). Private IP literals and localhost work by default. Arbitrary hostnames are rejected to reduce DNS rebinding exposure. For an HTTPS reverse proxy, set `TUYA_PUBLIC_ORIGIN` to its exact origin (for example `https://cameras.example.com`, with no path); this also enables Secure session cookies. Forward Host unchanged, and keep the direct HTTP listener private. Forwarded headers are not trusted to select an origin or a client address. Proxied clients share the proxy's login rate limit.
+
+All API writes require JSON. Host, Origin and Fetch Metadata checks reject cross-origin controls and embedded private resources. Responses restrict scripts, framing, content sniffing and referrer disclosure. Idle connections, request sizes and simultaneous HTTP workers are bounded. Docker drops capabilities, prevents privilege escalation and runs with a read-only root filesystem; account data volumes remain writable. New POSIX runtime files use an owner-only umask. These are layers of protection, not a claim that the server has undergone an independent security audit.
+
+Do not expose it directly to the Internet. Preserve private media-candidate routing; HTTPS alone does not solve WebRTC routing. The request-origin policy follows the [OWASP CSRF prevention guidance](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html). Remote desktop windows have no [Tauri native capabilities](https://v2.tauri.app/security/capabilities/).
 
 ## Private data
 

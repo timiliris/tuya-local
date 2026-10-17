@@ -94,7 +94,12 @@ class SettingsTests(unittest.TestCase):
         payload = json.dumps({'deviceId': 'owned'}).encode()
         handler = console.Handler.__new__(console.Handler)
         handler.path = '/api/settings/read'
-        handler.headers = {'Content-Length': str(len(payload)), 'Host': '127.0.0.1:8787'}
+        from email.message import Message
+        from console_security import Security
+        handler.headers = Message()
+        for key, value in {'Content-Length': str(len(payload)), 'Host': '127.0.0.1:8787', 'Content-Type': 'application/json'}.items(): handler.headers[key] = value
+        handler.command = 'POST'
+        handler.server = Mock(security=Security())
         handler.rfile = io.BytesIO(payload)
         handler.json = Mock()
         runtime = Mock(); runtime.action.return_value = describe(metadata())

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Tuya Local">
+<rect x="8" y="8" width="240" height="240" rx="56" fill="#13263c"/>
+<path d="M52 114V72h42m68 0h42v42M52 150v34h42m68 0h42v-34" fill="none" stroke="#9dbfff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="128" cy="128" r="41" fill="#416ed6"/>
+<circle cx="128" cy="128" r="19" fill="#edf3fa"/>
+<circle cx="193" cy="193" r="15" fill="#72c9aa" stroke="#13263c" stroke-width="8"/>
+</svg>

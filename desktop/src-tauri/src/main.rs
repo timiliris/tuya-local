@@ -60,20 +60,37 @@ async fn probe(url: &Url) -> Result<(), String> {
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| "Connexion indisponible.")?;
-    let response = client
-        .get(url.join("api/state").map_err(|_| "Adresse invalide.")?)
+    let mut response = client
+        .get(url.join("api/health").map_err(|_| "Adresse invalide.")?)
         .send()
         .await
         .map_err(|_| "Serveur inaccessible. Vérifie son adresse et sa connexion.")?;
-    if !response.status().is_success() || response.content_length().unwrap_or(0) > 1_000_000 {
+    let legacy = response.status() == reqwest::StatusCode::NOT_FOUND;
+    if legacy {
+        response = client
+            .get(url.join("api/state").map_err(|_| "Adresse invalide.")?)
+            .send()
+            .await
+            .map_err(|_| "Serveur inaccessible.")?;
+    }
+    if !response.status().is_success() || response.content_length().unwrap_or(0) > 65536 {
         return Err("Ce serveur ne répond pas comme Tuya Local.".into());
     }
-    let value: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|_| "Réponse du serveur invalide.")?;
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| "Réponse invalide.")? {
+        if body.len() + chunk.len() > 65536 {
+            return Err("Réponse du serveur trop volumineuse.".into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    let value: serde_json::Value =
+        serde_json::from_slice(&body).map_err(|_| "Réponse du serveur invalide.")?;
     if value.get("localOnly") != Some(&serde_json::Value::Bool(true))
-        || !value.get("cameras").is_some_and(|c| c.is_array())
+        || if legacy {
+            !value.get("cameras").is_some_and(|c| c.is_array())
+        } else {
+            value.get("service").and_then(|v| v.as_str()) != Some("tuya-local")
+        }
     {
         return Err("Ce serveur ne répond pas comme Tuya Local.".into());
     }
@@ -309,6 +326,53 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+
+    fn probe_fixture(responses: Vec<String>) -> Result<(), String> {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            for response in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(4)))
+                    .unwrap();
+                let mut request = [0; 4096];
+                let _ = stream.read(&mut request);
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        let result = tauri::async_runtime::block_on(probe(
+            &Url::parse(&format!("http://{address}/")).unwrap(),
+        ));
+        server.join().unwrap();
+        result
+    }
+
+    #[test]
+    fn probe_accepts_public_health_without_reading_private_camera_state() {
+        assert!(probe_fixture(vec![
+            "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{\"service\":\"tuya-local\",\"localOnly\":true}".into()
+        ]).is_ok());
+        assert!(probe_fixture(vec![
+            "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n".into(),
+            "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{\"cameras\":[],\"localOnly\":true}"
+                .into()
+        ])
+        .is_ok());
+    }
+
+    #[test]
+    fn probe_rejects_redirects_unrecognized_servers_and_unbounded_responses() {
+        for response in [
+            "HTTP/1.1 302 Found\r\nLocation: http://example.invalid/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into(),
+            "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{\"service\":\"other\",\"localOnly\":true}".into(),
+            format!("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{}", "x".repeat(65537)),
+        ] {
+            assert!(probe_fixture(vec![response]).is_err());
+        }
+    }
+
     #[test]
     fn switching_servers_allocates_distinct_window_labels() {
         let first = viewer_label();

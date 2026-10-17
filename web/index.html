@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark"><title>Tuya Local — Caméras</title>
+<link rel="icon" href="/brand.svg" type="image/svg+xml"><meta name="color-scheme" content="light dark"><title>Tuya Local — Caméras</title>
 <script src="/display.js"></script><link rel="stylesheet" href="/app.css"><script src="/i18n.js" defer></script><script src="/webrtc.js" defer></script><script src="/recovery.js" defer></script><script src="/settings.js" defer></script><script src="/ai.js" defer></script><script src="/app.js" defer></script>
 </head>
 <body>
@@ -21,13 +21,13 @@
 </defs></svg>
 <div class="app">
 <aside class="sidebar">
-<a class="brand" href="/" aria-label="Tuya Local, accueil" data-i18n-aria-label="Tuya Local, accueil"><span class="brand-icon"><svg><use href="#camera"/></svg></span><span>Tuya <b>Local</b><small><span data-i18n="Vos caméras, chez vous.">Vos caméras, chez vous.</span></small></span></a>
+<a class="brand" href="/" aria-label="Tuya Local, accueil" data-i18n-aria-label="Tuya Local, accueil"><img class="brand-mark" src="/brand.svg" width="42" height="42" alt=""><span>Tuya <b>Local</b><small><span data-i18n="Vos caméras, chez vous.">Vos caméras, chez vous.</span></small></span></a>
 <nav aria-label="Navigation" data-i18n-aria-label="Navigation"><button id="nav-cameras" class="nav-item active"><svg><use href="#grid"/></svg><span data-i18n="Caméras">Caméras</span><span id="nav-count" class="count">0</span></button><button id="nav-ai" class="nav-item"><svg><use href="#shield"/></svg><span data-i18n="IA locale">IA locale</span></button><button id="nav-diagnostics" class="nav-item"><svg><use href="#pulse"/></svg><span data-i18n="État du serveur">État du serveur</span></button></nav>
 <div class="sidebar-list"><p class="section-label"><span data-i18n="Mes caméras">Mes caméras</span></p><div id="camera-nav"></div></div>
 <div class="sidebar-bottom"><div class="connection"><span id="server-dot" class="dot"></span><div><strong id="server-label"><span data-i18n="Connexion au serveur…">Connexion au serveur…</span></strong><small id="account-label"><span data-i18n="Compte Tuya">Compte Tuya</span></small></div></div><button id="account-button" class="sidebar-action"><svg><use href="#link"/></svg><span data-i18n="Gérer la connexion">Gérer la connexion</span></button></div>
 </aside>
 <div class="workspace">
-<header class="topbar"><span class="breadcrumb"><span data-i18n="Mon installation">Mon installation</span> <svg><use href="#chevron"/></svg> <strong id="breadcrumb"><span data-i18n="Caméras">Caméras</span></strong></span><div class="topbar-actions"><label class="language-control"><select id="theme" aria-label="Thème" data-i18n-aria-label="Thème"><option value="system" data-i18n="Automatique">Automatique</option><option value="light" data-i18n="Clair">Clair</option><option value="dark" data-i18n="Sombre">Sombre</option></select></label><label class="language-control"><select id="language" aria-label="Langue" data-i18n-aria-label="Langue"><option value="fr">Français</option><option value="en">English</option><option value="nl">Nederlands</option><option value="de">Deutsch</option><option value="es">Español</option></select></label><div class="local-badge"><svg><use href="#shield"/></svg><span data-i18n="Vidéo en local">Vidéo en local</span></div></div></header>
+<header class="topbar"><span class="breadcrumb"><span data-i18n="Mon installation">Mon installation</span> <svg><use href="#chevron"/></svg> <strong id="breadcrumb"><span data-i18n="Caméras">Caméras</span></strong></span><div class="topbar-actions"><button id="access-logout" class="text-button" hidden data-i18n="Se déconnecter">Se déconnecter</button><label class="language-control"><select id="theme" aria-label="Thème" data-i18n-aria-label="Thème"><option value="system" data-i18n="Automatique">Automatique</option><option value="light" data-i18n="Clair">Clair</option><option value="dark" data-i18n="Sombre">Sombre</option></select></label><label class="language-control"><select id="language" aria-label="Langue" data-i18n-aria-label="Langue"><option value="fr">Français</option><option value="en">English</option><option value="nl">Nederlands</option><option value="de">Deutsch</option><option value="es">Español</option></select></label><div class="local-badge"><svg><use href="#shield"/></svg><span data-i18n="Vidéo en local">Vidéo en local</span></div></div></header>
 <main>
 <section id="camera-page">
 <div class="page-heading"><div><h1><span data-i18n="Vos caméras">Vos caméras</span></h1><p id="page-subtitle"><span data-i18n="Retrouvez votre installation en un coup d’œil.">Retrouvez votre installation en un coup d’œil.</span></p></div><button id="refresh" class="button secondary"><svg><use href="#refresh"/></svg><span data-i18n="Actualiser">Actualiser</span></button></div>

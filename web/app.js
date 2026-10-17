@@ -12,6 +12,7 @@ async function api(path, body, options = {}) {
   const timeout=setTimeout(abort,path.startsWith('/api/settings/')?100000:path==='/api/player/offer'?115000:10000);
   try {
     const response = await fetch(path, {method: body === undefined ? 'GET' : 'POST', headers: {'Content-Type':'application/json'}, body: body === undefined ? undefined : JSON.stringify(body),signal:controller.signal});
+    if(response.status===401){location.replace('/');throw new Error(t('Session expirée. Reconnectez-vous.'));}
     const result = await response.json();
     if (!response.ok) throw new Error(t(result.error) || t('La demande a échoué.'));
     return result;
@@ -278,3 +279,5 @@ $('#sentinel-fullscreen').onclick=()=>sentinel.fullscreenScreen();
 $('#sentinel-form').onsubmit=event=>{event.preventDefault();const cameras=[...$('#sentinel-cameras').querySelectorAll('input:checked')].map(input=>input.value);$('#sentinel-error').hidden=sentinel.enter({cameras,mode:$('#sentinel-mode').value,interval:Number($('#sentinel-interval').value),quality:$('#sentinel-quality').value});};
 window.addEventListener('online',()=>{poll();for(const tile of tiles.values())tile.recovery.now();});
 I18N.ready.then(() => {$('#language').value=I18N.language; localAI.initialize(); poll(); setInterval(poll,4000);});
+
+fetch('/api/access').then(response=>response.json()).then(access=>{const button=$('#access-logout');button.hidden=!access.enabled;button.onclick=async()=>{button.disabled=true;try{await Promise.all([...tiles.values()].map(tile=>stop(tile)));await api('/api/access/logout',{});location.replace('/');}catch(error){button.disabled=false;toast(error.message);}};}).catch(()=>{});

@@ -20,7 +20,7 @@ COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY src /app/src
-COPY web/index.html web/app.js web/settings.js web/ai.js web/webrtc.js web/display.js web/recovery.js web/app.css web/i18n.js web/locales.json /app/web/
+COPY web/index.html web/app.js web/settings.js web/ai.js web/webrtc.js web/display.js web/recovery.js web/app.css web/i18n.js web/locales.json web/brand.svg web/login.html web/login.css web/login.js /app/web/
 COPY LICENSE NOTICE.md /app/licenses/
 COPY vendor/tuya-ipc-terminal/LICENSE /app/licenses/tuya-ipc-terminal-MIT.txt
 COPY vendor/nanodet /app/vendor/nanodet
@@ -33,6 +33,8 @@ RUN chmod 755 /app/bin/tuya-ipc-terminal \
 ENV TUYA_BRIDGE_ROOT=/app \
     PYTHONPATH=/app/src \
     PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    TUYA_HTTP_HOST=0.0.0.0 \
     TUYA_LOCAL_MEDIA_ONLY=1 \
     TUYA_HEVC_TRANSPORT=rtp \
     TUYA_HEVC_EAGER_START=1 \
@@ -43,7 +45,7 @@ ENV TUYA_BRIDGE_ROOT=/app \
 USER bridge
 EXPOSE 8787 8554
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/api/state', timeout=3)"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/api/health', timeout=3)"
 
 WORKDIR /data/tuya-rtsp-bridge
 CMD ["python", "-u", "/app/src/console.py"]

@@ -22,7 +22,7 @@ class TranslationTests(unittest.TestCase):
             def handle_starttag(self,tag,attrs):
                 for name,value in attrs:
                     if name.startswith('data-i18n'):self.keys.append(value)
-        parser=Markup();parser.keys=[];parser.feed((ROOT/'web/index.html').read_text())
+        parser=Markup();parser.keys=[];parser.feed((ROOT/'web/index.html').read_text());parser.feed((ROOT/'web/login.html').read_text())
         for key in parser.keys:self.assertIn(key,keys)
         js='\n'.join((ROOT/'web'/name).read_text() for name in ['app.js','display.js','settings.js','ai.js'])
         for match in re.finditer(r"\bt\('([^']*)'\)",js):self.assertIn(match.group(1),keys)

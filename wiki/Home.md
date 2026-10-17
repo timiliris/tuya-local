@@ -2,6 +2,10 @@
 
 A local camera server and Tauri v2 desktop application. Docker and the desktop app share the same corrected video engine, interface, camera settings and optional object detection.
 
+![Dark dashboard](https://raw.githubusercontent.com/timiliris/tuya-local/main/wiki/images/dashboard-dark.png)
+
+*Current interface, using synthetic cameras with no private video or account data.*
+
 ## Start here
 
 - [Docker server](Docker)
@@ -20,3 +24,7 @@ Video and AI inference stay local. Account login, wake-up, signaling and some co
 Documentation is maintained in English. The interface supports French, English, Dutch, German and Spanish.
 
 [Source repository](https://github.com/timiliris/tuya-local)
+
+## Light appearance
+
+![Light dashboard](https://raw.githubusercontent.com/timiliris/tuya-local/main/wiki/images/dashboard-light.png)

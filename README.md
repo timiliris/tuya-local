@@ -1,5 +1,7 @@
 # Tuya Local
 
+<img src="desktop/icon.svg" width="88" height="88" alt="Tuya Local logo">
+
 A local camera server and **Tauri v2 desktop application** for macOS, Windows and Linux. Docker and desktop share one corrected media engine and one interface.
 
 - Built-in local server or connection to an existing server.
@@ -7,6 +9,10 @@ A local camera server and **Tauri v2 desktop application** for macOS, Windows an
 - Automatic wake-up, camera settings, themes and sentinel display.
 - Optional local AI per camera, battery protection and event history.
 - French, English, Dutch, German and Spanish interface.
+
+![Tuya Local dashboard in dark mode](wiki/images/dashboard-dark.png)
+
+*Documentation preview with synthetic cameras. No private video or account data.*
 
 ## Run with Docker
 
@@ -26,6 +32,6 @@ Open [Tuya Local](http://127.0.0.1:18788/) and scan the QR code with Tuya / Smar
 
 Wiki sources live in `wiki/`. Old guides, translations and installers are preserved through [Archives](https://github.com/timiliris/tuya-local/wiki/Archives).
 
-Video and AI inference stay local; account login, signaling, wake-up and some commands still use Tuya. The server has no built-in web login: keep localhost access or protect it on a trusted private network.
+Video and AI inference stay local; account login, signaling, wake-up and some commands still use Tuya. Optional password protection covers the web interface and its API. Localhost access remains the default. See [security and access](https://github.com/timiliris/tuya-local/wiki/Network-and-privacy) before enabling LAN access.
 
 Account sessions, device keys and private thumbnails are excluded from this repository. Based on [DanEng1982/tuya-rtsp-bridge](https://github.com/DanEng1982/tuya-rtsp-bridge), with the [seydx/tuya-ipc-terminal](https://github.com/seydx/tuya-ipc-terminal) engine. Required licenses and attributions: [LICENSE](LICENSE), [NOTICE.md](NOTICE.md).

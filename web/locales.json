@@ -333,7 +333,16 @@
     "observations": "observations",
     "Confiance maximale": "Confiance maximale",
     "Confirmé": "Confirmé",
-    "À confirmer": "À confirmer"
+    "À confirmer": "À confirmer",
+    "Accès à votre serveur": "Accès à votre serveur",
+    "Saisissez le mot de passe de ce serveur pour accéder aux caméras.": "Saisissez le mot de passe de ce serveur pour accéder aux caméras.",
+    "Mot de passe du serveur": "Mot de passe du serveur",
+    "Se connecter": "Se connecter",
+    "Se déconnecter": "Se déconnecter",
+    "Votre session reste sur cet appareil. La vidéo et l’analyse restent locales.": "Votre session reste sur cet appareil. La vidéo et l’analyse restent locales.",
+    "Trop de tentatives. Attendez une minute.": "Trop de tentatives. Attendez une minute.",
+    "Mot de passe incorrect.": "Mot de passe incorrect.",
+    "Session expirée. Reconnectez-vous.": "Session expirée. Reconnectez-vous."
   },
   "en": {
     "Vos caméras, chez vous.": "Your cameras, at home.",
@@ -669,7 +678,16 @@
     "observations": "observations",
     "Confiance maximale": "Peak confidence",
     "Confirmé": "Confirmed",
-    "À confirmer": "Awaiting confirmation"
+    "À confirmer": "Awaiting confirmation",
+    "Accès à votre serveur": "Server access",
+    "Saisissez le mot de passe de ce serveur pour accéder aux caméras.": "Enter this server’s password to access your cameras.",
+    "Mot de passe du serveur": "Server password",
+    "Se connecter": "Sign in",
+    "Se déconnecter": "Sign out",
+    "Votre session reste sur cet appareil. La vidéo et l’analyse restent locales.": "Your session stays on this device. Video and analysis stay local.",
+    "Trop de tentatives. Attendez une minute.": "Too many attempts. Wait one minute.",
+    "Mot de passe incorrect.": "Incorrect password.",
+    "Session expirée. Reconnectez-vous.": "Session expired. Sign in again."
   },
   "nl": {
     "Vos caméras, chez vous.": "Je camera’s, bij jou thuis.",
@@ -1005,7 +1023,16 @@
     "observations": "waarnemingen",
     "Confiance maximale": "Hoogste betrouwbaarheid",
     "Confirmé": "Bevestigd",
-    "À confirmer": "Wacht op bevestiging"
+    "À confirmer": "Wacht op bevestiging",
+    "Accès à votre serveur": "Servertoegang",
+    "Saisissez le mot de passe de ce serveur pour accéder aux caméras.": "Voer het wachtwoord van deze server in om je camera’s te openen.",
+    "Mot de passe du serveur": "Serverwachtwoord",
+    "Se connecter": "Aanmelden",
+    "Se déconnecter": "Afmelden",
+    "Votre session reste sur cet appareil. La vidéo et l’analyse restent locales.": "Je sessie blijft op dit apparaat. Video en analyse blijven lokaal.",
+    "Trop de tentatives. Attendez une minute.": "Te veel pogingen. Wacht één minuut.",
+    "Mot de passe incorrect.": "Onjuist wachtwoord.",
+    "Session expirée. Reconnectez-vous.": "Sessie verlopen. Meld je opnieuw aan."
   },
   "de": {
     "Vos caméras, chez vous.": "Deine Kameras, bei dir zu Hause.",
@@ -1341,7 +1368,16 @@
     "observations": "Beobachtungen",
     "Confiance maximale": "Höchste Konfidenz",
     "Confirmé": "Bestätigt",
-    "À confirmer": "Bestätigung ausstehend"
+    "À confirmer": "Bestätigung ausstehend",
+    "Accès à votre serveur": "Serverzugang",
+    "Saisissez le mot de passe de ce serveur pour accéder aux caméras.": "Gib das Passwort dieses Servers ein, um auf deine Kameras zuzugreifen.",
+    "Mot de passe du serveur": "Serverpasswort",
+    "Se connecter": "Anmelden",
+    "Se déconnecter": "Abmelden",
+    "Votre session reste sur cet appareil. La vidéo et l’analyse restent locales.": "Deine Sitzung bleibt auf diesem Gerät. Video und Analyse bleiben lokal.",
+    "Trop de tentatives. Attendez une minute.": "Zu viele Versuche. Warte eine Minute.",
+    "Mot de passe incorrect.": "Falsches Passwort.",
+    "Session expirée. Reconnectez-vous.": "Sitzung abgelaufen. Melde dich erneut an."
   },
   "es": {
     "Vos caméras, chez vous.": "Tus cámaras, en casa.",
@@ -1677,6 +1713,15 @@
     "observations": "observaciones",
     "Confiance maximale": "Confianza máxima",
     "Confirmé": "Confirmado",
-    "À confirmer": "Pendiente de confirmación"
+    "À confirmer": "Pendiente de confirmación",
+    "Accès à votre serveur": "Acceso al servidor",
+    "Saisissez le mot de passe de ce serveur pour accéder aux caméras.": "Introduce la contraseña de este servidor para acceder a tus cámaras.",
+    "Mot de passe du serveur": "Contraseña del servidor",
+    "Se connecter": "Iniciar sesión",
+    "Se déconnecter": "Cerrar sesión",
+    "Votre session reste sur cet appareil. La vidéo et l’analyse restent locales.": "Tu sesión permanece en este dispositivo. El vídeo y el análisis siguen siendo locales.",
+    "Trop de tentatives. Attendez une minute.": "Demasiados intentos. Espera un minuto.",
+    "Mot de passe incorrect.": "Contraseña incorrecta.",
+    "Session expirée. Reconnectez-vous.": "La sesión ha caducado. Inicia sesión de nuevo."
   }
 }
