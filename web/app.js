@@ -217,6 +217,10 @@ function render(next) {
   for (const camera of next.cameras) if (!tiles.has(camera.deviceId)) addCamera(camera); else {const tile=tiles.get(camera.deviceId); tile.camera=camera; $('h2',tile.node).textContent=camera.deviceName; $('span:last-child',tile.nav).textContent=camera.deviceName;}
   $('#nav-count').textContent = next.cameras.length;
   $('#page-subtitle').textContent = next.cameras.length ? t(next.cameras.length === 1 ? '{count} caméra connectée au compte. Choisis celles que tu veux regarder.' : '{count} caméras connectées au compte. Choisis celles que tu veux regarder.',{count:next.cameras.length}) : t('Retrouve tes caméras en connectant ton compte Tuya.');
+  if(!AccessControl.isAdmin(currentAccess))$('#page-subtitle').textContent=next.cameras.length?t(next.cameras.length===1?'{count} caméra autorisée.':'{count} caméras autorisées.',{count:next.cameras.length}):t('Aucune caméra autorisée');
+  $('#empty h2').textContent=t(AccessControl.isAdmin(currentAccess)?'Aucune caméra pour le moment':'Aucune caméra autorisée');
+  $('#empty p').textContent=t(AccessControl.isAdmin(currentAccess)?'Connecte ton compte Tuya pour retrouver tes caméras.':'Un administrateur peut vous donner accès aux caméras.');
+  $('#empty-connect').hidden=!AccessControl.isAdmin(currentAccess);
   $('#empty').hidden = next.cameras.length > 0; $('.camera-layout').hidden = !next.cameras.length;
   $('#account-label').textContent = next.loggedIn ? t('Compte Tuya connecté') : t('Compte non connecté');
   $('#server-label').textContent = next.engineRunning ? t('Bridge disponible') : t('Bridge arrêté');

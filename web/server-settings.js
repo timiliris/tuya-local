@@ -5,9 +5,10 @@ class ServerSettings {
     this.dialog=document.querySelector('#server-settings-dialog');this.form=document.querySelector('#server-access-form');
     this.status=document.querySelector('#server-access-status');this.summary=document.querySelector('#server-access-summary');
     this.current=document.querySelector('#server-current-password');this.password=document.querySelector('#server-new-password');this.confirmation=document.querySelector('#server-confirm-password');
-    this.adminName=document.querySelector('#server-admin-username');this.users=[];this.user=null;this.editing=null;this.tab='users';
+    this.adminName=document.querySelector('#server-admin-username');this.users=[];this.user=null;this.editing=null;this.tab='users';this.cameras=[];this.selectedCameras=new Set();this.allCameras=false;
     this.userForm=document.querySelector('#server-user-form');this.userName=document.querySelector('#server-user-name');this.userRole=document.querySelector('#server-user-role');this.userPassword=document.querySelector('#server-user-password');this.userConfirmation=document.querySelector('#server-user-confirmation');
     document.querySelector('#server-user-add').onclick=()=>this.editUser(null,true);
+    this.userRole.onchange=()=>this.renderCameras();document.querySelector('#server-user-all-cameras').onchange=event=>{this.allCameras=event.target.checked;this.renderCameras();};
     this.userForm.onsubmit=event=>{event.preventDefault();this.saveUser();};document.querySelector('#server-user-cancel').onclick=()=>this.editUser(null);
     this.close=document.querySelector('#server-settings-close');this.submit=document.querySelector('#server-access-save');this.enabled=false;this.saving=false;
     document.querySelector('#server-users-tab').onclick=()=>{this.tab='users';this.render();};document.querySelector('#server-password-tab').onclick=()=>{this.tab='password';this.render();};
@@ -45,12 +46,12 @@ class ServerSettings {
       const result=await this.api('/api/access/password',{username:this.adminName.value || 'admin',currentPassword:this.current.value,password:this.password.value,confirmation:this.confirmation.value});
       this.enabled=result.enabled;this.user=result.user;this.clear();this.status.textContent=this.t('Mot de passe enregistré. Vos autres sessions ont été déconnectées.');this.onSaved(result);try{await this.loadUsers();}catch(error){this.status.textContent+=' '+error.message;}
     }catch(error){this.status.textContent=error.message;}
-    finally{this.saving=false;this.onSaving(false);this.close.disabled=false;this.submit.disabled=false;for(const field of [this.current,this.password,this.confirmation])field.readOnly=false;for(const control of this.dialog.querySelectorAll?.('button,input,select') || [])control.disabled=false;this.render();}
+    finally{this.saving=false;this.onSaving(false);this.close.disabled=false;this.submit.disabled=false;for(const field of [this.current,this.password,this.confirmation])field.readOnly=false;for(const control of this.dialog.querySelectorAll?.('button,input,select') || [])control.disabled=false;this.render();this.renderCameras();}
   }
   async loadUsers(){
     const result=await this.api('/api/access/users');
     if(!this.dialog.open)return;
-    this.users=Array.isArray(result.users)?result.users:[];this.renderUsers();
+    this.users=Array.isArray(result.users)?result.users:[];this.cameras=Array.isArray(result.cameras)?result.cameras:[];this.renderUsers();
   }
   renderUsers(){
     const list=document.querySelector('#server-users-list');list.replaceChildren?.();
@@ -58,7 +59,7 @@ class ServerSettings {
     for(const user of this.users){
       const row=document.createElement('div');row.className='server-user-row';
       const detail=document.createElement('div'),name=document.createElement('strong'),role=document.createElement('small');
-      name.textContent=user.username;role.textContent=this.t(user.role==='admin'?'Administrateur':'Lecture seule');detail.append(name,role);row.append(detail);
+      name.textContent=user.username;role.textContent=this.t(user.role==='admin'?'Administrateur':'Lecture seule')+' · '+this.t(user.role==='admin' || user.cameraIds===null?'Toutes les caméras':user.cameraIds?.length?'Caméras sélectionnées':'Aucune caméra autorisée');detail.append(name,role);row.append(detail);
       if(user.id===this.user?.id){const own=document.createElement('small');own.textContent=this.t('Votre compte');row.append(own);}
       else{
         for(const [label,action] of [['Modifier',()=>this.editUser(user)],['Supprimer',()=>this.deleteUser(user)]]){
@@ -70,15 +71,34 @@ class ServerSettings {
   }
   editUser(user,show=Boolean(user)){
     if(this.saving)return;this.userForm.hidden=!show;this.editing=user;this.userName.value=user?.username || '';this.userName.readOnly=Boolean(user);this.userRole.value=user?.role || 'viewer';this.userPassword.value='';this.userConfirmation.value='';
+    this.selectedCameras=new Set(user?.cameraIds || []);this.allCameras=Boolean(user && user.cameraIds===null);this.renderCameras();
     this.userPassword.required=!user;this.userConfirmation.required=!user;
     document.querySelector('#server-user-form-title').textContent=this.t(user?'Modifier un utilisateur':'Ajouter un utilisateur');
     document.querySelector('#server-user-save').textContent=this.t(user?'Enregistrer les droits':'Ajouter l’utilisateur');
     document.querySelector('#server-user-cancel').hidden=!show;
     document.querySelector('#server-user-password-help').textContent=this.t(user?'Laissez vide pour conserver le mot de passe actuel.':'Au moins 12 caractères. Utilisez un mot de passe unique.');
+    if(show){this.userForm.scrollIntoView?.({block:'start'});this.userName.focus?.({preventScroll:true});}
+  }
+  renderCameras(){
+    const admin=this.userRole.value==='admin';
+    document.querySelector('#server-user-camera-admin').hidden=!admin;
+    document.querySelector('#server-user-camera-options').hidden=admin;
+    document.querySelector('#server-user-all-cameras').checked=this.allCameras;
+    const container=document.querySelector('#server-user-cameras');container.replaceChildren?.();
+    if(admin)return;
+    const cameras=new Map(this.cameras.map(camera=>[camera.deviceId,camera]));
+    for(const id of this.selectedCameras)if(!cameras.has(id))cameras.set(id,{deviceId:id,deviceName:this.t('Caméra indisponible ({id})',{id})});
+    for(const camera of cameras.values()){
+      const label=document.createElement('label'),input=document.createElement('input'),name=document.createElement('span');
+      label.className='server-camera-check';input.type='checkbox';input.value=camera.deviceId;input.checked=this.allCameras || this.selectedCameras.has(camera.deviceId);input.disabled=this.allCameras || this.saving;
+      input.onchange=()=>{if(input.checked)this.selectedCameras.add(camera.deviceId);else this.selectedCameras.delete(camera.deviceId);};
+      name.textContent=camera.deviceName;label.append(input,name);container.append(label);
+    }
+    if(!cameras.size){const empty=document.createElement('p');empty.className='server-camera-empty';empty.textContent=this.t('Aucune caméra disponible pour le moment.');container.append(empty);}
   }
   async saveUser(){
     if(this.saving)return;
-    const body={id:this.editing?.id,username:this.userName.value,role:this.userRole.value,password:this.userPassword.value,confirmation:this.userConfirmation.value};
+    const body={id:this.editing?.id,username:this.userName.value,role:this.userRole.value,cameraIds:this.userRole.value==='admin' || this.allCameras?null:[...this.selectedCameras],password:this.userPassword.value,confirmation:this.userConfirmation.value};
     if((!this.editing || body.password || body.confirmation) && (body.password.length<12 || body.password.length>1024)){this.status.textContent=this.t('Utilisez un mot de passe de 12 à 1024 caractères.');return;}
     if(body.password!==body.confirmation){this.status.textContent=this.t('Les mots de passe ne correspondent pas.');return;}
     await this.mutateUser(this.editing?'update':'create',body);
@@ -100,7 +120,7 @@ class ServerSettings {
     finally{
       this.saving=false;this.onSaving(false);this.close.disabled=false;
       for(const control of this.dialog.querySelectorAll?.('button,input,select') || [])control.disabled=false;
-      this.renderUsers();if(saved)this.editUser(null);
+      this.renderUsers();if(saved)this.editUser(null);else this.renderCameras();
     }
   }
 

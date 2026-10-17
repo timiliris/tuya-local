@@ -70,14 +70,14 @@ class Players:
         self.lock = threading.RLock()
         self.items = {}
 
-    def create(self, url: str, transport: str = 'mp4', owner=None) -> str:
+    def create(self, url: str, transport: str = 'mp4', owner=None, device=None) -> str:
         if transport not in ('mp4', 'webrtc'):
             raise ValueError('Transport vidéo inconnu.')
         with self.lock:
             if len(self.items) >= 8:
                 raise ValueError('Huit lecteurs sont déjà ouverts. Arrête un lecteur pour continuer.')
             token = secrets.token_urlsafe(24)
-            self.items[token] = {'url': url, 'seen': time.monotonic(), 'process': None, 'claimed': False, 'transport': transport, 'owner': owner}
+            self.items[token] = {'url': url, 'seen': time.monotonic(), 'process': None, 'claimed': False, 'transport': transport, 'owner': owner, 'deviceId': device}
             return token
 
     def touch(self, token: str) -> bool:
@@ -163,9 +163,9 @@ class Players:
                     proc.kill()
                 proc.wait(timeout=2)
 
-    def reap(self, owners=None):
+    def reap(self, owners=None, permitted=None):
         with self.lock:
-            expired = [token for token, item in self.items.items() if (owners is not None and item.get('owner') not in owners) or time.monotonic() - item['seen'] > PLAYER_IDLE_TIMEOUT or item['process'] is not None and item['process'].poll() is not None]
+            expired = [token for token, item in self.items.items() if (owners is not None and item.get('owner') not in owners) or (permitted is not None and not permitted(item.get('owner'), item.get('deviceId'))) or time.monotonic() - item['seen'] > PLAYER_IDLE_TIMEOUT or item['process'] is not None and item['process'].poll() is not None]
         for token in expired:
             self.stop(token)
 
@@ -241,13 +241,14 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(token, str):
             return False
         with players.lock:
-            return token in players.items and players.items[token].get('owner') == self.server.security.owner(self.headers.get('Cookie'))
+            return token in players.items and players.items[token].get('owner') == self.server.security.owner(self.headers.get('Cookie')) and self.server.security.can_view(self.headers.get('Cookie'), players.items[token].get('deviceId'))
 
     def clean_sessions(self):
-        threading.Thread(target=lambda: players.reap(self.server.security.active_owners()), daemon=True).start()
+        threading.Thread(target=lambda: players.reap(self.server.security.active_owners(), self.server.security.can_view_owner), daemon=True).start()
 
     def user_state(self):
-        state = console_state(upstream('/api/state'))
+        raw = upstream('/api/state')
+        state = console_state({**raw, 'cameras': self.server.security.visible_cameras(self.headers.get('Cookie'), raw.get('cameras', []))})
         if not self.server.security.is_admin(self.headers.get('Cookie')):
             state.update(hasQr=False, qrId=None, regions={}, region=None)
             for camera in state['cameras']:
@@ -281,7 +282,7 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith('/api/') and path != '/api/state' and not self.server.security.is_admin(self.headers.get('Cookie')):
                 return self.json(403, {'error': 'Accès réservé aux administrateurs.'})
             if path == '/api/access/users':
-                return self.json(200, self.server.security.public_users(self.headers.get('Cookie')))
+                return self.json(200, {**self.server.security.public_users(self.headers.get('Cookie')), 'cameras': [{'deviceId': camera['deviceId'], 'deviceName': camera.get('deviceName', '')} for camera in runtime.state().get('cameras', [])]})
             if path in {'/api/ai/state','/api/ai/events'}:
                 devices = {cam['deviceId'] for cam in runtime.state().get('cameras', [])}
                 return self.json(200, ai_service().state(devices) if path.endswith('/state') else ai_service().events(devices))
@@ -350,7 +351,7 @@ class Handler(BaseHTTPRequestHandler):
             if path not in viewer_actions and not security.is_admin(self.headers.get('Cookie')):
                 return self.json(403, {'error': 'Accès réservé aux administrateurs.'})
             if path.startswith('/api/access/users/'):
-                result = security.manage_user(self.headers.get('Cookie'), path.removeprefix('/api/access/users/'), body)
+                result = security.manage_user(self.headers.get('Cookie'), path.removeprefix('/api/access/users/'), body, {camera['deviceId'] for camera in runtime.state().get('cameras', [])})
                 self.clean_sessions()
                 return self.json(200, result)
             if path == '/api/access/password':
@@ -380,11 +381,15 @@ class Handler(BaseHTTPRequestHandler):
                     return self.json(503, {'error': 'Le modèle IA n’a pas pu analyser cette image.'})
             if path == '/api/player/start':
                 state = upstream('/api/state')
-                url = playback_url(state, body.get('deviceId'), body.get('quality', 'sd'))
+                device = body.get('deviceId')
+                visible = security.visible_cameras(self.headers.get('Cookie'), state.get('cameras', []))
+                if not any(camera.get('deviceId') == device for camera in visible):
+                    return self.json(404, {'error': 'Caméra introuvable ou non autorisée.'})
+                url = playback_url({**state, 'cameras': visible}, device, body.get('quality', 'sd'))
                 if not state.get('rtsp', {}).get('running'):
                     upstream('/api/rtsp/start', {})
                 transport = body.get('transport', 'mp4')
-                token = players.create(url, transport, security.owner(self.headers.get('Cookie')))
+                token = players.create(url, transport, security.owner(self.headers.get('Cookie')), device)
                 return self.json(200, {'token': token, 'url': f'/stream/{token}.mp4', 'transport': transport})
             if path in {'/api/player/offer', '/api/player/heartbeat', '/api/player/stop'} and not self.owns_player(body.get('token')):
                 return self.json(404, {'error': 'Lecteur introuvable.'})
@@ -444,7 +449,7 @@ def main(stop_event=None):
     def reap():
         while True:
             time.sleep(10)
-            players.reap(security.active_owners())
+            players.reap(security.active_owners(), security.can_view_owner)
             if _ai is not None:
                 _ai.cleanup()
     threading.Thread(target=reap, daemon=True).start()

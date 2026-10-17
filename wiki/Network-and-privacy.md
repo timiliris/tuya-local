@@ -17,11 +17,11 @@ Camera VLANs must route the necessary traffic. An RTSP URL in a browser tab is n
 
 ## Web access protection
 
-Open **Server settings** to create the first administrator or manage user accounts. Existing single passwords migrate to username `admin`, keeping the same password. Choose a unique password of at least 12 characters. No `.env` edit or restart is needed. See [Users and permissions](Users-and-permissions) for the role matrix and account management.
+Open **Server settings** to create the first administrator or manage user accounts. Existing single passwords migrate to username `admin`, keeping the same password. Choose a unique password of at least 12 characters. No `.env` edit or restart is needed. See [Users and permissions](Users-and-permissions) for roles, per-camera grants and account management.
 
 ![User settings](https://raw.githubusercontent.com/timiliris/tuya-local/main/wiki/images/users.png)
 
-The server stores usernames, roles, random salts and scrypt verifiers in its private `web-access.json` file. It writes the file atomically with owner-only permissions on POSIX. Docker keeps it in the existing account data volume; desktop uses its isolated app data directory. The saved password survives upgrades and restarts and takes precedence over environment-based initialization. An invalid saved verifier stops startup instead of silently removing protection.
+The server stores usernames, roles, camera grants, random salts and scrypt verifiers in its private `web-access.json` file. It writes the file atomically with owner-only permissions on POSIX. Docker keeps it in the existing account data volume; desktop uses its isolated app data directory. The saved password survives upgrades and restarts and takes precedence over environment-based initialization. An invalid saved verifier stops startup instead of silently removing protection.
 
 Setting the first password closes unauthenticated viewers. Changing your own password revokes your previous sessions and players; the initiating browser receives a replacement session and stays signed in. Changes to another account revoke only that account’s sessions and players. Close and reopen the viewer if another device was signed out. The first password should be set while access is restricted to localhost or a trusted network.
 

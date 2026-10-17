@@ -4,7 +4,7 @@ const AccessControl={
   apply(document,access,translate){
     const admin=this.isAdmin(access);
     document.documentElement.classList.toggle('viewer-session',!admin);
-    for(const id of ['nav-ai','nav-diagnostics','server-settings-open','account-button','refresh','detail-settings','detail-copy']){
+    for(const id of ['nav-ai','nav-diagnostics','server-settings-open','account-button','refresh','detail-settings','detail-copy','empty-connect']){
       const node=document.getElementById(id);if(node)node.hidden=!admin;
     }
     const pad=document.getElementById('ptz-pad');if(pad?.parentElement)pad.parentElement.hidden=!admin;

@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 SESSION_SECONDS = 12 * 60 * 60
 COOKIE = 'tuya_local_session'
 ALGORITHM = 'scrypt-16384-8-1'
+UNSET = object()
 
 
 class Security:
@@ -32,20 +33,24 @@ class Security:
                 if record.get('algorithm') != ALGORITHM:
                     raise ValueError()
                 if record.get('version') == 1:
-                    records = [{'id': 'legacy-admin', 'username': 'admin', 'role': 'admin', 'salt': record['salt'], 'digest': record['digest']}]
-                elif record.get('version') == 2:
+                    records = [{'id': 'legacy-admin', 'username': 'admin', 'role': 'admin', 'salt': record['salt'], 'digest': record['digest'], 'cameraIds': None}]
+                elif record.get('version') in (2, 3):
                     records = record['users']
+                    if record['version'] == 2:
+                        records = [dict(user, cameraIds=None) for user in records]
                 else:
                     raise ValueError()
                 if not isinstance(records, list) or not 1 <= len(records) <= 32:
                     raise ValueError()
                 names = set()
                 for user in records:
-                    if set(user) != {'id', 'username', 'role', 'salt', 'digest'} or not isinstance(user['id'], str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,64}', user['id']):
+                    if set(user) != {'id', 'username', 'role', 'salt', 'digest', 'cameraIds'} or not isinstance(user['id'], str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,64}', user['id']):
                         raise ValueError()
                     if self.username(user['username']) != user['username'] or user['role'] not in ('admin', 'viewer'):
                         raise ValueError()
                     if user['id'] in self.users or user['username'] in names or len(bytes.fromhex(user['salt'])) != 16 or len(bytes.fromhex(user['digest'])) != 32:
+                        raise ValueError()
+                    if self.camera_selection(user['cameraIds']) != user['cameraIds'] or user['role'] == 'admin' and user['cameraIds'] is not None:
                         raise ValueError()
                     self.users[user['id']] = user
                     names.add(user['username'])
@@ -97,9 +102,31 @@ class Security:
     def hash(password, salt):
         return hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1, dklen=32)
 
-    def make_user(self, username, role, password, identifier=None):
+    def make_user(self, username, role, password, identifier=None, camera_ids=UNSET):
         salt = secrets.token_bytes(16)
-        return {'id': identifier or secrets.token_hex(16), 'username': username, 'role': role, 'salt': salt.hex(), 'digest': self.hash(password, salt).hex()}
+        return {'id': identifier or secrets.token_hex(16), 'username': username, 'role': role, 'salt': salt.hex(), 'digest': self.hash(password, salt).hex(), 'cameraIds': None if role == 'admin' else self.camera_selection([] if camera_ids is UNSET else camera_ids)}
+
+    @staticmethod
+    def camera_selection(value):
+        if value is None:
+            return None
+        if not isinstance(value, list) or len(value) > 512 or any(not isinstance(item, str) or not 1 <= len(item) <= 128 or any(ord(char) < 32 or ord(char) == 127 for char in item) for item in value):
+            raise ValueError('Sélection de caméras invalide.')
+        if len(set(value)) != len(value):
+            raise ValueError('Sélection de caméras invalide.')
+        return sorted(value)
+
+    def can_view(self, cookie, device):
+        with self.lock:
+            user = self.principal(cookie)
+            return bool(user and isinstance(device, str) and (user['role'] == 'admin' or user['cameraIds'] is None or device in user['cameraIds']))
+
+    def can_view_owner(self, owner, device):
+        return self.can_view(self.cookie(owner), device)
+
+    def visible_cameras(self, cookie, cameras):
+        with self.lock:
+            return [camera for camera in cameras if self.can_view(cookie, camera.get('deviceId'))]
 
     def matches(self, user, password):
         if not isinstance(password, str) or len(password) > 1024:
@@ -119,14 +146,14 @@ class Security:
     def principal(self, cookie):
         with self.lock:
             if not self.enabled:
-                return {'id': 'bootstrap', 'username': '', 'role': 'admin'}
+                return {'id': 'bootstrap', 'username': '', 'role': 'admin', 'cameraIds': None}
             token = self.token(cookie)
             session = self.sessions.get(token)
             if not session or session['expires'] <= time.monotonic():
                 self.sessions.pop(token, None)
                 return None
             user = self.users.get(session['userId'])
-            return {key: user[key] for key in ('id', 'username', 'role')} if user else None
+            return {key: user[key] for key in ('id', 'username', 'role', 'cameraIds')} if user else None
 
     def authenticated(self, cookie):
         return self.principal(cookie) is not None
@@ -224,7 +251,7 @@ class Security:
             self.storage.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', prefix='.web-access-', dir=self.storage.parent, delete=False) as output:
                 temporary = Path(output.name)
-                json.dump({'version': 2, 'algorithm': ALGORITHM, 'users': list(users.values())}, output)
+                json.dump({'version': 3, 'algorithm': ALGORITHM, 'users': list(users.values())}, output)
                 output.flush()
                 os.fsync(output.fileno())
             os.replace(temporary, self.storage)
@@ -269,9 +296,9 @@ class Security:
         with self.lock:
             if not self.is_admin(cookie):
                 raise PermissionError('Accès réservé aux administrateurs.')
-            return {'users': [{key: user[key] for key in ('id', 'username', 'role')} for user in sorted(self.users.values(), key=lambda user: user['username'])]}
+            return {'users': [{key: user[key] for key in ('id', 'username', 'role', 'cameraIds')} for user in sorted(self.users.values(), key=lambda user: user['username'])]}
 
-    def manage_user(self, cookie, operation, body):
+    def manage_user(self, cookie, operation, body, known_cameras=None):
         with self.lock:
             actor = self.principal(cookie)
             if not actor or actor['role'] != 'admin' or not self.enabled:
@@ -288,7 +315,10 @@ class Security:
                 if role not in ('admin', 'viewer'):
                     raise ValueError('Rôle inconnu.')
                 self.validate_password(body.get('password'), body.get('confirmation'))
-                user = self.make_user(name, role, body['password'])
+                selection = None if role == 'admin' else self.camera_selection(body.get('cameraIds', []))
+                if known_cameras is not None and selection is not None and not set(selection).issubset(known_cameras):
+                    raise ValueError('Une caméra sélectionnée n’est plus disponible. Actualisez la liste.')
+                user = self.make_user(name, role, body['password'], camera_ids=selection)
                 updated[user['id']] = user
             else:
                 if not isinstance(identifier, str) or identifier not in updated:
@@ -302,9 +332,14 @@ class Security:
                     if role not in ('admin', 'viewer'):
                         raise ValueError('Rôle inconnu.')
                     user = dict(updated[identifier]); user['role'] = role
+                    selection = None if role == 'admin' else self.camera_selection(body.get('cameraIds', [] if updated[identifier]['role'] == 'admin' else updated[identifier]['cameraIds']))
+                    retained = set(updated[identifier]['cameraIds'] or [])
+                    if known_cameras is not None and selection is not None and not set(selection).issubset(set(known_cameras) | retained):
+                        raise ValueError('Une caméra sélectionnée n’est plus disponible. Actualisez la liste.')
+                    user['cameraIds'] = selection
                     if body.get('password') or body.get('confirmation'):
                         self.validate_password(body.get('password'), body.get('confirmation'))
-                        user = self.make_user(user['username'], role, body['password'], identifier)
+                        user = self.make_user(user['username'], role, body['password'], identifier, camera_ids=selection)
                     updated[identifier] = user
                 else:
                     raise ValueError('Action inconnue.')

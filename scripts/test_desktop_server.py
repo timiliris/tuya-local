@@ -87,7 +87,7 @@ def test_runtime():
                 with post(opener, base, '/api/access/password', {'currentPassword': env['TUYA_ACCESS_PASSWORD'], 'password': password, 'confirmation': password}) as response:
                     assert json.load(response)['enabled'] is True
                 with opener.open(base + '/api/state', timeout=3) as response: assert response.status == 200
-                with post(opener, base, '/api/access/users/create', {'username': 'reader', 'role': 'viewer', 'password': 'synthetic-reader-password', 'confirmation': 'synthetic-reader-password'}) as response:
+                with post(opener, base, '/api/access/users/create', {'username': 'reader', 'role': 'viewer', 'cameraIds': None if protected else [], 'password': 'synthetic-reader-password', 'confirmation': 'synthetic-reader-password'}) as response:
                     assert len(json.load(response)['users']) == 2
                 reader = client()
                 with post(reader, base, '/api/access/login', {'username': 'reader', 'password': 'synthetic-reader-password'}) as response: assert response.status == 200
@@ -106,7 +106,10 @@ def test_runtime():
                 require_auth(fresh, base)
                 with post(fresh, base, '/api/access/login', {'password': password}) as response: assert response.status == 200
                 with fresh.open(base + '/api/state', timeout=3) as response: assert json.load(response)['cameras'] == []
-                with post(client(), base, '/api/access/login', {'username': 'reader', 'password': 'synthetic-reader-password'}) as response: assert response.status == 200
+                restarted_reader = client()
+                with post(restarted_reader, base, '/api/access/login', {'username': 'reader', 'password': 'synthetic-reader-password'}) as response: assert response.status == 200
+                with restarted_reader.open(base + '/api/access', timeout=3) as response:
+                    assert json.load(response)['user']['cameraIds'] == (None if protected else [])
             finally:
                 stop(process)
     print('Frozen server: models, assets, password setup/rotation, restart persistence and graceful shutdown passed.')

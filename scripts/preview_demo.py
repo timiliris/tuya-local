@@ -42,7 +42,7 @@ if __name__ == '__main__':
         security = Security(Path(data) / 'web-access.json')
         if '--users' in sys.argv:
             for name, role in (('admin-demo', 'admin'), ('reader-demo', 'viewer')):
-                user = security.make_user(name, role, os.urandom(32).hex())
+                user = security.make_user(name, role, os.urandom(32).hex(), camera_ids=['demo-0'] if role == 'viewer' else None)
                 security.users[user['id']] = user
             server = ConsoleHTTPServer(('127.0.0.1', 18889), AccountPreviewHandler, security)
             viewer = ConsoleHTTPServer(('127.0.0.1', 18891), AccountPreviewHandler, security)

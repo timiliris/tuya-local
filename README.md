@@ -8,7 +8,7 @@ A local camera server and **Tauri v2 desktop application** for macOS, Windows an
 - Local RTSP/WebRTC video, HD/SD and H.264 compatibility fallback.
 - Automatic wake-up, camera settings, themes and sentinel display.
 - Optional local AI per camera, battery protection and event history.
-- Local administrator and read-only accounts with server-enforced permissions.
+- Local administrator and read-only accounts, with per-camera permissions enforced by the server.
 - French, English, Dutch, German and Spanish interface.
 
 ![Tuya Local dashboard in dark mode](wiki/images/dashboard-dark.png)

@@ -72,3 +72,5 @@ body.sentinel{background:#08121e;overflow:hidden}
 .viewer-session #nav-ai,.viewer-session #nav-diagnostics,.viewer-session #server-settings-open,.viewer-session #account-button,.viewer-session #refresh{display:none!important}
 
 #server-user-add{margin-top:18px}.server-users-heading{gap:16px}#server-users-list{margin-top:18px}
+
+#server-user-camera-fieldset{border:1px solid var(--line);border-radius:8px;padding:16px;margin:20px 0}#server-user-camera-fieldset legend{font-size:12px;font-weight:600;padding:0 5px}#server-user-camera-fieldset p,#server-user-camera-fieldset small{font-size:11px;line-height:1.7;color:var(--muted);margin:8px 0 0}#server-user-form .server-camera-check{display:flex;align-items:center;gap:10px;font-size:12px;font-weight:400;margin:10px 0}#server-user-form .server-camera-check input{width:17px;height:17px;flex-shrink:0;padding:0;accent-color:var(--blue)}#server-user-cameras{max-height:220px;overflow:auto}#server-user-cameras label span{overflow-wrap:anywhere}
