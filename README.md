@@ -22,9 +22,9 @@ Open [Tuya Local](http://127.0.0.1:18788/) and scan the QR code with Tuya / Smar
 
 ## Documentation
 
-**[Wiki](https://github.com/timiliris/tuya-local/wiki)** · [Desktop application](wiki/Desktop.md) · [Docker](wiki/Docker.md) · [Development](wiki/Development.md)
+**[Wiki](https://github.com/timiliris/tuya-local/wiki)** · [Desktop application](https://github.com/timiliris/tuya-local/wiki/Desktop) · [Docker](https://github.com/timiliris/tuya-local/wiki/Docker) · [Development](https://github.com/timiliris/tuya-local/wiki/Development)
 
-Wiki sources live in `wiki/`. Old guides, translations and installers are preserved through [Archives](wiki/Archives.md).
+Wiki sources live in `wiki/`. Old guides, translations and installers are preserved through [Archives](https://github.com/timiliris/tuya-local/wiki/Archives).
 
 Video and AI inference stay local; account login, signaling, wake-up and some commands still use Tuya. The server has no built-in web login: keep localhost access or protect it on a trusted private network.
 

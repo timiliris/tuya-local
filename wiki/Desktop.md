@@ -14,6 +14,10 @@ Enter the root URL of an existing Tuya Local server: Docker on this computer or 
 
 Server dashboards do not receive native Tauri capabilities. HTTP is accepted for localhost and private IP addresses; public addresses require HTTPS. The server has no built-in web login: restrict access to a trusted or protected private network. Public video relay candidates remain rejected.
 
+## Development packages
+
+Open the latest successful [Desktop build](https://github.com/timiliris/tuya-local/actions/workflows/desktop.yml) and download the artifact for your operating system. A GitHub account is required to download workflow artifacts. Packages are development builds, not signed or notarized public releases.
+
 ## Build from source
 
 Install the [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/), Python, Go and Node.js. Use an isolated Python environment:
