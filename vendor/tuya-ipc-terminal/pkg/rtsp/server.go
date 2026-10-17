@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"sync"
 	"time"
 
@@ -28,6 +29,7 @@ type RTSPServer struct {
 }
 
 type RTSPClient struct {
+	passive              bool
 	conn                 net.Conn
 	session              string
 	cameraPath           string
@@ -254,8 +256,31 @@ func (s *RTSPServer) handleConnection(conn net.Conn) {
 
 	core.Logger.Info().Msgf("New RTSP connection for camera: %s (%s)", camera.DeviceName, camera.DeviceID)
 
-	// Create or get existing stream
-	stream, err := s.getOrCreateStream(camera, streamResolution, user)
+	// AI observers never start or retain a battery camera session.
+	parsed, _ := url.Parse(request.URL)
+	aiMode := parsed.Query().Get("ai")
+	passive := aiMode == "passive"
+	if aiMode != "" {
+		host, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
+		if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+			sendRTSPResponse(conn, 403, "Forbidden", nil, "")
+			return
+		}
+		var skill tuya.Skill
+		if json.Unmarshal([]byte(camera.Skill), &skill) != nil || skill.LowPower != 0 || len(skill.Videos) == 0 {
+			passive = true
+		}
+	}
+	var stream *CameraStream
+	if passive {
+		stream = s.observedStream(camera.DeviceID)
+	} else {
+		stream, err = s.getOrCreateStream(camera, streamResolution, user)
+	}
+	if passive && stream == nil {
+		sendRTSPResponse(conn, 454, "Session Not Found", nil, "")
+		return
+	}
 	if err != nil {
 		core.Logger.Error().Err(err).Msgf("Failed to create stream for camera %s", camera.DeviceName)
 		sendRTSPResponse(conn, 500, "Internal Server Error", nil, "Failed to create stream")
@@ -264,6 +289,7 @@ func (s *RTSPServer) handleConnection(conn net.Conn) {
 
 	// Create RTSP client
 	client := &RTSPClient{
+		passive:             passive,
 		conn:                conn,
 		reader:              reader,
 		session:             session,
@@ -281,7 +307,15 @@ func (s *RTSPServer) handleConnection(conn net.Conn) {
 
 	// Add client to server and stream
 	s.addClient(client)
-	stream.AddClient(client)
+	if passive {
+		if !stream.addObserver(client) {
+			s.removeClient(client.session)
+			sendRTSPResponse(conn, 454, "Session Not Found", nil, "")
+			return
+		}
+	} else {
+		stream.AddClient(client)
+	}
 
 	// Handle initial request
 	s.handleRTSPMethod(client, request)
@@ -483,6 +517,13 @@ func (cs *CameraStream) RemoveClient(sessionID string) {
 	}
 
 	delete(cs.clients, sessionID)
+	if !cs.hasViewer() {
+		for _, observer := range cs.clients {
+			if observer.passive {
+				observer.conn.Close()
+			}
+		}
+	}
 	cs.lastActivity = time.Now()
 
 	// Schedule stream shutdown if no clients and stream is active
@@ -611,4 +652,36 @@ func (cs *CameraStream) scheduleShutdown() {
 
 		cs.shutdownTimer = nil
 	})
+}
+
+// Caller holds cs.mutex. Observers are excluded from camera ownership.
+func (cs *CameraStream) hasViewer() bool {
+	for _, client := range cs.clients {
+		if !client.passive {
+			return true
+		}
+	}
+	return false
+}
+func (cs *CameraStream) addObserver(client *RTSPClient) bool {
+	cs.mutex.Lock()
+	defer cs.mutex.Unlock()
+	if !cs.active || !cs.hasViewer() {
+		return false
+	}
+	cs.clients[client.session] = client
+	return true
+}
+func (s *RTSPServer) observedStream(device string) *CameraStream {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	for _, stream := range s.streams {
+		stream.mutex.RLock()
+		available := stream.camera.DeviceID == device && stream.active && stream.hasViewer()
+		stream.mutex.RUnlock()
+		if available {
+			return stream
+		}
+	}
+	return nil
 }

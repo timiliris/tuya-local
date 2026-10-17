@@ -25,3 +25,7 @@ compose.test.yml
 .tuya-data
 *.pcap
 *.pcapng
+
+# Private local AI configuration and detection history (including snapshots)
+**/ai-config.json
+**/ai-events.sqlite*

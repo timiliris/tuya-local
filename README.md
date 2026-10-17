@@ -7,8 +7,11 @@ A standalone Docker fork of [DanEng1982/tuya-rtsp-bridge](https://github.com/Dan
 - French, English, Dutch, German and Spanish interface; light, dark and system themes.
 - Sentinel display: selected cameras, fullscreen grid or timed rotation, saved settings and screen wake lock when supported.
 - QR account login, snapshots and PTZ where supported by the camera.
+- Typed camera settings, batched changes, automatic battery-camera wake-up and reported-value confirmation.
+- Optional server-side NanoDet object detection per camera, with class, confidence, size and area filters; local event history and optional thumbnails.
+- Continuous analysis for powered cameras, or passive analysis following an existing VLC/browser stream. Recognized battery cameras always use passive analysis, which stops with the last viewer.
 
-Tuya is still required for account login, wake-up and signaling. PTZ can use Tuya's cloud. Video relay candidates are rejected; camera compatibility and long-sleep wake-up depend on the model and firmware. Continuous sentinel viewing uses battery power on solar/battery cameras.
+Tuya is still required for account login, wake-up and signaling. PTZ and camera settings can use Tuya's cloud. Video relay candidates are rejected; camera compatibility and long-sleep wake-up depend on the model and firmware. Continuous sentinel viewing uses battery power on solar/battery cameras.
 
 ## Run Tuya Local
 
@@ -23,6 +26,10 @@ docker compose up -d --build
 Open [the local interface](http://127.0.0.1:18788/) and scan its QR code using Tuya / Smart Life. The camera VLAN must communicate with the Docker host. The host ports 52000–52019/UDP (camera media) and 52100–52119/TCP (browser WebRTC) are bound to the configured LAN address. The web interface and RTSP output are bound to localhost by default. There is no application login for the web interface; keep the localhost binding unless access is restricted on your trusted network.
 
 Account sessions and device keys stay in the `tuya_data` and `tuya_config` Docker volumes. `.env`, local playlists, captures and runtime data are ignored by Git and the Docker build context. The source contains public Tuya application-profile constants inherited from upstream or documented protocol work; these are distinct from private account sessions and camera keys. `.gitleaks.toml` allows only those exact public constants, without excluding source files from scanning.
+
+AI inference runs inside the Docker server and does not require an open browser. Models are bundled at image build time with pinned checksums; video frames are never sent to an external inference service. The AI page exposes per-camera worker states, live detection overlays and grouped event observations. History is limited to seven days and 500 observations; thumbnails are opt-in. Local AI settings and the event database (including thumbnails) stay in the data volume and are excluded from Git and the Docker build context.
+
+The NanoDet implementation and model weights come from OpenCV Zoo under Apache-2.0; see [vendor/nanodet/LICENSE](vendor/nanodet/LICENSE) and [NOTICE.md](NOTICE.md).
 
 The original MIT licenses and attribution remain in [LICENSE](LICENSE), [NOTICE.md](NOTICE.md) and [CREDITS.md](CREDITS.md). The inherited desktop / Home Assistant documentation below describes the original project, not the standalone Tuya Local Docker interface.
 

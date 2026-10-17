@@ -108,3 +108,16 @@ Plain-language summary: [docs/legal.md](docs/legal.md) · [docs/rechtliches.md](
 Desktop GUI, local HTTP API, QR login client, PTZ wrapper, watchdog,
 i18n, installer script, and documentation in this repository — unless a
 file says otherwise.
+
+
+## OpenCV Zoo — NanoDet local object detection
+
+The inference implementation in `vendor/nanodet/nanodet.py` is vendored from
+[OpenCV Zoo](https://github.com/opencv/opencv_zoo/tree/47534e27c9851bb1128ccc0102f1145e27f23f98/models/object_detection_nanodet),
+commit `47534e27c9851bb1128ccc0102f1145e27f23f98`, under Apache License 2.0.
+The complete license is preserved in `vendor/nanodet/LICENSE`.
+
+The standard and quantized NanoDet ONNX weights from that same revision are
+downloaded during Docker image construction and verified by size and SHA-256
+in `src/ai_models.py`. They are not stored in this Git repository.
+The source repository distributes this model under Apache-2.0.

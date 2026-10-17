@@ -15,6 +15,8 @@ class Runtime:
         self.lock = threading.RLock()
         self.closed = threading.Event()
         self.worker = None
+        from console_settings import Settings
+        self.settings = Settings(tuya_data(), ensure_engine=self.ensure_settings_engine)
 
     def start(self):
         if self.backend.client.login:
@@ -102,7 +104,18 @@ class Runtime:
         except Exception:
             self.backend.set_phase('error', '')
 
+    def ensure_settings_engine(self):
+        with self.lock:
+            if not self.backend.rtsp.running():
+                self.backend.rtsp.start()
+
     def action(self, path, body):
+        if path == '/api/settings/start':
+            return self.settings.start(body)
+        if path in {'/api/settings/status', '/api/settings/cancel'}:
+            return self.settings.job_state(body.get('job'), cancel=path.endswith('/cancel'))
+        if path in {'/api/settings/read', '/api/settings/write'}:
+            return self.settings.request(body, write=path.endswith('/write'))
         with self.lock:
             if path == '/api/qr/start':
                 return self.qr_start(body.get('region', 'we'))

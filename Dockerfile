@@ -11,7 +11,7 @@ RUN go test ./pkg/rtsp ./pkg/webrtc ./pkg/tuya && go build -trimpath -ldflags="-
 
 FROM python:3.12-slim-bookworm
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates libgomp1 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 1000 --shell /usr/sbin/nologin bridge
 
@@ -21,6 +21,8 @@ RUN pip install --no-cache-dir -r /app/requirements-docker.txt
 
 COPY src /app/src
 COPY web /app/web
+COPY vendor/nanodet /app/vendor/nanodet
+RUN python /app/src/ai_models.py /app/models
 COPY --from=engine /out/tuya-ipc-terminal /app/bin/tuya-ipc-terminal
 RUN chmod 755 /app/bin/tuya-ipc-terminal \
     && mkdir -p /data/tuya-rtsp-bridge /config/tuya-rtsp-bridge \

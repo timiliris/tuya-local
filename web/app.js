@@ -9,7 +9,7 @@ async function api(path, body, options = {}) {
   const controller=new AbortController();
   const abort=()=>controller.abort();options.signal?.addEventListener('abort',abort,{once:true});
   if(options.signal?.aborted)controller.abort();
-  const timeout=setTimeout(abort,path==='/api/player/offer'?115000:10000);
+  const timeout=setTimeout(abort,path.startsWith('/api/settings/')?100000:path==='/api/player/offer'?115000:10000);
   try {
     const response = await fetch(path, {method: body === undefined ? 'GET' : 'POST', headers: {'Content-Type':'application/json'}, body: body === undefined ? undefined : JSON.stringify(body),signal:controller.signal});
     const result = await response.json();
@@ -19,9 +19,9 @@ async function api(path, body, options = {}) {
 }
 function changePage(page) {
   currentPage = page;
-  $('#camera-page').hidden = page !== 'cameras'; $('#diagnostics-page').hidden = page !== 'diagnostics';
-  $('#nav-cameras').classList.toggle('active',page === 'cameras'); $('#nav-diagnostics').classList.toggle('active',page === 'diagnostics');
-  $('#breadcrumb').textContent = page === 'cameras' ? t('Caméras') : t('État du serveur');
+  $('#camera-page').hidden = page !== 'cameras'; $('#diagnostics-page').hidden = page !== 'diagnostics'; $('#ai-page').hidden=page!=='ai';
+  $('#nav-cameras').classList.toggle('active',page === 'cameras'); $('#nav-diagnostics').classList.toggle('active',page === 'diagnostics'); $('#nav-ai').classList.toggle('active',page==='ai');
+  $('#breadcrumb').textContent = page === 'cameras' ? t('Caméras') : page==='ai'?t('IA locale'):t('État du serveur');
 }
 function changeView(mode, id = focused) {
   view = mode; focused = id || tiles.keys().next().value;
@@ -35,6 +35,7 @@ function changeView(mode, id = focused) {
 }
 function status(tile, phase, message = '') {
   tile.phase = phase;
+  if(phase!=='playing')tile.aiLayer?.replaceChildren();
   tile.message = I18N.source(message);
   message = t(tile.message);
   for (const name of ['loading','playing','error']) tile.node.classList.toggle(name,phase === name);
@@ -189,6 +190,7 @@ function capture(tile) {
 }
 function addCamera(camera) {
   const node = $('#camera-template').content.firstElementChild.cloneNode(true);
+  $('.tile-settings',node).onclick=()=>settingsPanel.open(camera.deviceId);
   const nav = document.createElement('button'); nav.className = 'camera-nav-button'; nav.innerHTML = '<span class="dot"></span><span></span>';
   $('span:last-child',nav).textContent = camera.deviceName; nav.onclick = () => {changePage('cameras'); changeView('focus',camera.deviceId);};
   const tile = {camera,node,nav,phase:'idle',generation:0,compatibility:new Set()};
@@ -207,7 +209,7 @@ function addCamera(camera) {
 function render(next) {
   state = next;
   const ids = new Set(next.cameras.map(camera => camera.deviceId));
-  for (const [id,tile] of tiles) if (!ids.has(id)) {stop(tile); tile.node.remove(); tile.nav.remove(); tiles.delete(id);}
+  for (const [id,tile] of tiles) if (!ids.has(id)) {stop(tile); tile.aiResize?.disconnect(); tile.node.remove(); tile.nav.remove(); tiles.delete(id);}
   for (const camera of next.cameras) if (!tiles.has(camera.deviceId)) addCamera(camera); else {const tile=tiles.get(camera.deviceId); tile.camera=camera; $('h2',tile.node).textContent=camera.deviceName; $('span:last-child',tile.nav).textContent=camera.deviceName;}
   $('#nav-count').textContent = next.cameras.length;
   $('#page-subtitle').textContent = next.cameras.length ? t(next.cameras.length === 1 ? '{count} caméra connectée au compte. Choisis celles que tu veux regarder.' : '{count} caméras connectées au compte. Choisis celles que tu veux regarder.',{count:next.cameras.length}) : t('Retrouve tes caméras en connectant ton compte Tuya.');
@@ -229,9 +231,11 @@ function render(next) {
 }
 let polling=false;
 async function poll() {if(polling)return;polling=true;try {render(await api('/api/state'));} catch {$('#server-label').textContent=t('Bridge injoignable'); $('#server-dot').className='dot amber'; $('#page-subtitle').textContent=t('Impossible de joindre le bridge. Vérifie que le serveur Docker est démarré.');}finally{polling=false;} }
+$('#nav-ai').onclick=()=>{changePage('ai');localAI.open();};
 $('#nav-cameras').onclick = () => changePage('cameras'); $('#nav-diagnostics').onclick = () => changePage('diagnostics');
 $('#grid-view').onclick = () => changeView('grid'); $('#focus-view').onclick = () => changeView('focus');
 $('#stop-all').onclick = () => {for (const tile of tiles.values()) stop(tile);};
+$('#detail-settings').onclick=()=>{if(focused)settingsPanel.open(focused);};
 $('#detail-capture').onclick = () => {const tile=tiles.get(focused); if(tile) capture(tile);};
 $('#detail-copy').onclick = async () => {const tile=tiles.get(focused); if(!tile) return; const quality=$('select',tile.node).value; try {await navigator.clipboard.writeText(quality==='hd' ? tile.camera.rtspHd : tile.camera.rtspSd); toast(t('Lien VLC copié.'));} catch {toast(t('Le navigateur n’a pas autorisé la copie.'));}};
 $('#refresh').onclick = async () => {if ([...tiles.values()].some(tile => ['playing','loading','retrying'].includes(tile.phase))) return toast(t('Arrête les lectures avant de rechercher les caméras.')); const button=$('#refresh');button.disabled=true;try {render(await api('/api/cameras/refresh',{}));toast(t('Liste des caméras actualisée.'));}catch(error){toast(error.message);}finally{button.disabled=false;}};
@@ -258,8 +262,12 @@ $('#language').onchange = async event => {
   if (state) render(state);
   for (const tile of tiles.values()) status(tile,tile.phase,tile.message || '');
   changePage(currentPage);
+  if(settingsPanel.dialog.open)settingsPanel.render();
+  localAI.retranslate();
   $('#ptz-status').textContent=t('Disponibilité selon le modèle. Le pilotage peut utiliser le cloud Tuya.');
 };
+const localAI=new LocalAIConsole({api,tiles,translate:t,cameras:()=>state?.cameras || []});
+const settingsPanel=new CameraSettings.Panel({api,cameras:()=>state?.cameras || [],translate:t});
 const sentinel=new SentinelDisplay({tiles,start,stop,changeView,changePage,translate:t});
 $('#theme').value=DisplayTheme.preference;$('#theme').onchange=event=>DisplayTheme.apply(event.target.value);
 $('#sentinel-open').onclick=()=>{ $('#sentinel-error').hidden=true;sentinel.configure();};
@@ -269,4 +277,4 @@ $('#sentinel-next').onclick=()=>sentinel.next();
 $('#sentinel-fullscreen').onclick=()=>sentinel.fullscreenScreen();
 $('#sentinel-form').onsubmit=event=>{event.preventDefault();const cameras=[...$('#sentinel-cameras').querySelectorAll('input:checked')].map(input=>input.value);$('#sentinel-error').hidden=sentinel.enter({cameras,mode:$('#sentinel-mode').value,interval:Number($('#sentinel-interval').value),quality:$('#sentinel-quality').value});};
 window.addEventListener('online',()=>{poll();for(const tile of tiles.values())tile.recovery.now();});
-I18N.ready.then(() => {$('#language').value=I18N.language; poll(); setInterval(poll,4000);});
+I18N.ready.then(() => {$('#language').value=I18N.language; localAI.initialize(); poll(); setInterval(poll,4000);});

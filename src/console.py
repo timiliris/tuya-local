@@ -16,7 +16,7 @@ from urllib.parse import urlparse, quote
 RTSP_HOST = '127.0.0.1:8554'
 PLAYER_IDLE_TIMEOUT = 150
 WEB = Path(__file__).resolve().parents[1] / 'web'
-ALLOWED_ACTIONS = {'/api/qr/start', '/api/cameras/refresh', '/api/ptz/move', '/api/rtsp/start'}
+ALLOWED_ACTIONS = {'/api/qr/start', '/api/cameras/refresh', '/api/ptz/move', '/api/rtsp/start', '/api/settings/read', '/api/settings/write', '/api/settings/start', '/api/settings/status', '/api/settings/cancel'}
 runtime = None
 
 
@@ -165,6 +165,38 @@ class Players:
 players = Players()
 
 
+_ai = None
+_ai_lock = threading.Lock()
+
+
+def ai_service():
+    global _ai
+    with _ai_lock:
+        if _ai is None:
+            from console_ai import LocalAI
+            from paths import tuya_data
+            _ai = LocalAI(tuya_data())
+        return _ai
+
+
+def ai_camera(state, device):
+    if not isinstance(device, str) or not any(cam.get('deviceId') == device for cam in state.get('cameras', [])):
+        raise ValueError('Caméra inconnue.')
+    return device
+
+
+def ai_player(state, device, token):
+    ai_camera(state, device)
+    if not isinstance(token, str):
+        raise ValueError('Ouvre la vidéo avant de lancer l’analyse.')
+    with players.lock:
+        item = players.items.get(token)
+        if not item or not item['claimed'] or item['process'] is None or item['process'].poll() is not None or time.monotonic()-item['seen']>PLAYER_IDLE_TIMEOUT:
+            raise ValueError('Ouvre la vidéo avant de lancer l’analyse.')
+        if item['url'] not in {playback_url(state,device,'sd'),playback_url(state,device,'hd')}:
+            raise ValueError('Caméra inconnue.')
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
@@ -181,6 +213,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
         try:
+            if path in {'/api/ai/state','/api/ai/events'}:
+                devices = {cam['deviceId'] for cam in runtime.state().get('cameras', [])}
+                return self.json(200, ai_service().state(devices) if path.endswith('/state') else ai_service().events(devices))
+            if path.startswith('/api/ai/snapshot/') and path.endswith('.jpg'):
+                devices = {cam['deviceId'] for cam in runtime.state().get('cameras', [])}
+                return self.send_bytes(ai_service().snapshot(path.removeprefix('/api/ai/snapshot/').removesuffix('.jpg'),devices),'image/jpeg')
             if path == '/api/diagnostics':
                 return self.json(200, runtime.diagnostics())
             if path == '/api/state':
@@ -190,7 +228,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_bytes(data, 'image/png')
             if path.startswith('/stream/') and path.endswith('.mp4'):
                 return self.stream(path.removeprefix('/stream/').removesuffix('.mp4'))
-            assets = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/webrtc.js': 'webrtc.js', '/display.js': 'display.js', '/recovery.js': 'recovery.js', '/app.css': 'app.css', '/i18n.js': 'i18n.js', '/locales.json': 'locales.json'}
+            assets = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/settings.js': 'settings.js', '/ai.js': 'ai.js', '/webrtc.js': 'webrtc.js', '/display.js': 'display.js', '/recovery.js': 'recovery.js', '/app.css': 'app.css', '/i18n.js': 'i18n.js', '/locales.json': 'locales.json'}
             if path not in assets:
                 return self.json(404, {'error': 'Page introuvable.'})
             file = WEB / assets[path]
@@ -214,11 +252,28 @@ class Handler(BaseHTTPRequestHandler):
         if origin and urlparse(origin).netloc != self.headers.get('Host'):
             return self.json(403, {'error': 'Origine non autorisée.'})
         try:
+            path = urlparse(self.path).path
             size = int(self.headers.get('Content-Length', '0'))
-            if size < 0 or size > 65536:
+            limit = 400000 if path == '/api/ai/analyze' else 65536
+            if size < 0 or size > limit:
                 return self.json(413, {'error': 'Requête trop volumineuse.'})
             body = json.loads(self.rfile.read(size) or b'{}')
-            path = urlparse(self.path).path
+            if not isinstance(body, dict):
+                raise ValueError('Requête invalide.')
+            if path in {'/api/ai/config','/api/ai/analyze','/api/ai/events/clear'}:
+                if path.endswith('/clear'):
+                    return self.json(200, ai_service().clear())
+                state = runtime.state()
+                device = ai_camera(state, body.get('deviceId'))
+                if path.endswith('/config'):
+                    return self.json(200, ai_service().configure(device, body.get('config')))
+                ai_player(state, device, body.get('token'))
+                try:
+                    return self.json(200, ai_service().analyze(device, body.get('frame')))
+                except ValueError:
+                    raise
+                except Exception:
+                    return self.json(503, {'error': 'Le modèle IA n’a pas pu analyser cette image.'})
             if path == '/api/player/start':
                 state = upstream('/api/state')
                 url = playback_url(state, body.get('deviceId'), body.get('quality', 'sd'))
@@ -236,7 +291,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json(200, {'ok': True})
             if path in ALLOWED_ACTIONS:
                 result = upstream(path, body)
-                return self.json(200, result if path == '/api/ptz/move' else console_state(result))
+                return self.json(200, result if path == '/api/ptz/move' or path.startswith('/api/settings/') else console_state(result))
             return self.json(404, {'error': 'Action inconnue.'})
         except (ValueError, TypeError) as exc:
             self.json(400, {'error': str(exc)})
@@ -270,10 +325,16 @@ def main():
     from console_runtime import Runtime
     runtime = Runtime()
     runtime.start()
+    from console_ai_worker import AIWorkers
+    service=ai_service()
+    service.workers=AIWorkers(service,runtime.state)
+    service.workers.start()
     def reap():
         while True:
             time.sleep(10)
             players.reap()
+            if _ai is not None:
+                _ai.cleanup()
     threading.Thread(target=reap, daemon=True).start()
     server = ThreadingHTTPServer(('0.0.0.0', 8787), Handler)
     def shutdown(*_):
@@ -288,6 +349,7 @@ def main():
         for token in tokens:
             players.stop(token)
         server.server_close()
+        service.workers.stop()
         runtime.stop()
 
 

@@ -7,6 +7,13 @@ Fork Docker autonome de [DanEng1982/tuya-rtsp-bridge](https://github.com/DanEng1
 - Interface en français, anglais, néerlandais, allemand et espagnol ; thèmes clair, sombre et automatique.
 - Mode sentinelle : caméras au choix, mosaïque ou rotation, plein écran, réglages mémorisés et maintien de l’écran éveillé si le navigateur le permet.
 - Connexion par QR code, captures d’image et PTZ selon le modèle.
+- Réglages typés par caméra, modifications groupées, réveil automatique des caméras sur batterie et confirmation des valeurs remontées.
+- IA NanoDet locale sur le serveur, activable par caméra, avec filtres d’objets, de confiance, de taille et de zone ; historique local et vignettes facultatives.
+- Analyse continue pour les caméras alimentées ou analyse passive d’un flux VLC/navigateur existant. Les modèles sur batterie reconnus restent en mode passif : l’analyse s’arrête avec le dernier lecteur.
+
+L’IA fonctionne sans navigateur ouvert. Les modèles sont intégrés à l’image Docker avec vérification de leur empreinte ; les images ne sont pas envoyées à un service d’analyse externe. La page IA affiche les états par caméra, les détections et les observations regroupées. L’historique conserve au maximum sept jours et 500 observations ; les vignettes sont facultatives. Les réglages IA et la base contenant les événements et leurs vignettes restent dans le volume de données, exclus de Git et du contexte de construction Docker.
+
+Les réglages des caméras peuvent utiliser le cloud Tuya, comme le compte, le réveil et la signalisation. La vidéo et l’analyse IA restent locales. NanoDet et ses modèles proviennent d’OpenCV Zoo sous licence Apache-2.0 ; voir [vendor/nanodet/LICENSE](vendor/nanodet/LICENSE) et [NOTICE.md](NOTICE.md).
 
 Le compte, le réveil et la négociation dépendent encore de Tuya. Le PTZ peut utiliser le cloud. Les relais vidéo sont refusés ; la compatibilité et le réveil après une longue veille dépendent du modèle et du firmware. La surveillance continue consomme la batterie des caméras solaires.
 

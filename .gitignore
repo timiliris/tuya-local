@@ -30,3 +30,7 @@ packaging/windows/cache/
 *.key
 **/cloud_auth.json
 **/protect_session.json
+
+# Private local AI configuration and detection history (including snapshots)
+**/ai-config.json
+**/ai-events.sqlite*
