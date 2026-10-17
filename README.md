@@ -8,6 +8,7 @@ A local camera server and **Tauri v2 desktop application** for macOS, Windows an
 - Local RTSP/WebRTC video, HD/SD and H.264 compatibility fallback.
 - Automatic wake-up, camera settings, themes and sentinel display.
 - Optional local AI per camera, battery protection and event history.
+- Local administrator and read-only accounts with server-enforced permissions.
 - French, English, Dutch, German and Spanish interface.
 
 ![Tuya Local dashboard in dark mode](wiki/images/dashboard-dark.png)
@@ -32,6 +33,6 @@ Open [Tuya Local](http://127.0.0.1:18788/) and scan the QR code with Tuya / Smar
 
 Wiki sources live in `wiki/`. Old guides, translations and installers are preserved through [Archives](https://github.com/timiliris/tuya-local/wiki/Archives).
 
-Video and AI inference stay local; account login, signaling, wake-up and some commands still use Tuya. Set or change the optional web/API password in **Server settings**, without editing configuration files. Localhost access remains the default. See [security and access](https://github.com/timiliris/tuya-local/wiki/Network-and-privacy) before enabling LAN access.
+Video and AI inference stay local; account login, signaling, wake-up and some commands still use Tuya. Manage local administrator and read-only accounts in **Server settings**, without editing configuration files. Existing single passwords migrate to the `admin` account. Localhost access remains the default. See [security and access](https://github.com/timiliris/tuya-local/wiki/Network-and-privacy) before enabling LAN access.
 
 Account sessions, device keys and private thumbnails are excluded from this repository. Based on [DanEng1982/tuya-rtsp-bridge](https://github.com/DanEng1982/tuya-rtsp-bridge), with the [seydx/tuya-ipc-terminal](https://github.com/seydx/tuya-ipc-terminal) engine. Required licenses and attributions: [LICENSE](LICENSE), [NOTICE.md](NOTICE.md).

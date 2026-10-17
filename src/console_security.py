@@ -1,6 +1,5 @@
-"""HTTP trust boundaries and optional local access sessions (no Tuya credentials)."""
+"""Persistent local accounts, role checks and bounded HTTP trust boundaries."""
 from __future__ import annotations
-
 from collections import OrderedDict
 import hashlib
 import hmac
@@ -8,6 +7,7 @@ import ipaddress
 import json
 import tempfile
 import os
+import re
 from pathlib import Path
 import secrets
 import threading
@@ -18,23 +18,39 @@ from urllib.parse import urlsplit
 
 SESSION_SECONDS = 12 * 60 * 60
 COOKIE = 'tuya_local_session'
+ALGORITHM = 'scrypt-16384-8-1'
 
 
 class Security:
     def __init__(self, storage=None):
         self.storage = Path(storage) if storage is not None else None
-        self.salt = secrets.token_bytes(16)
-        self.digest = None
+        self.users = {}
+        self.dummy_salt = secrets.token_bytes(16)
         if self.storage is not None and self.storage.exists():
             try:
                 record = json.loads(self.storage.read_text())
-                if record.get('version') != 1 or record.get('algorithm') != 'scrypt-16384-8-1':
+                if record.get('algorithm') != ALGORITHM:
                     raise ValueError()
-                salt = bytes.fromhex(record['salt'])
-                digest = bytes.fromhex(record['digest'])
-                if len(salt) != 16 or len(digest) != 32:
+                if record.get('version') == 1:
+                    records = [{'id': 'legacy-admin', 'username': 'admin', 'role': 'admin', 'salt': record['salt'], 'digest': record['digest']}]
+                elif record.get('version') == 2:
+                    records = record['users']
+                else:
                     raise ValueError()
-                self.salt, self.digest = salt, digest
+                if not isinstance(records, list) or not 1 <= len(records) <= 32:
+                    raise ValueError()
+                names = set()
+                for user in records:
+                    if set(user) != {'id', 'username', 'role', 'salt', 'digest'} or not isinstance(user['id'], str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,64}', user['id']):
+                        raise ValueError()
+                    if self.username(user['username']) != user['username'] or user['role'] not in ('admin', 'viewer'):
+                        raise ValueError()
+                    if user['id'] in self.users or user['username'] in names or len(bytes.fromhex(user['salt'])) != 16 or len(bytes.fromhex(user['digest'])) != 32:
+                        raise ValueError()
+                    self.users[user['id']] = user
+                    names.add(user['username'])
+                if not any(user['role'] == 'admin' for user in self.users.values()):
+                    raise ValueError()
             except (ValueError, KeyError, TypeError, AttributeError):
                 raise ValueError('Invalid saved access protection; repair the private configuration before startup') from None
         else:
@@ -44,9 +60,10 @@ class Security:
                 password = Path(password_file).read_text().rstrip('\r\n')
                 if not password:
                     raise ValueError('The configured access password file is empty')
-            if password and not 12 <= len(password) <= 1024:
-                raise ValueError('The access password must contain 12 to 1024 characters')
-            self.digest = self.hash(password) if password else None
+            if password:
+                self.validate_password(password, password)
+                user = self.make_user('admin', 'admin', password, 'legacy-admin')
+                self.users[user['id']] = user
         self.public_origin = os.environ.get('TUYA_PUBLIC_ORIGIN', '').rstrip('/')
         if self.public_origin:
             parsed = urlsplit(self.public_origin)
@@ -57,14 +74,80 @@ class Security:
             self.allowed_hosts.add(urlsplit(self.public_origin).hostname.lower())
         self.sessions = OrderedDict()
         self.attempts = OrderedDict()
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
 
     @property
     def enabled(self):
-        return self.digest is not None
+        return bool(self.users)
 
-    def hash(self, password, salt=None):
-        return hashlib.scrypt(password.encode(), salt=self.salt if salt is None else salt, n=16384, r=8, p=1, dklen=32)
+    @staticmethod
+    def username(value):
+        if not isinstance(value, str) or not re.fullmatch(r'[a-z0-9._-]{3,40}', value.strip().lower()):
+            raise ValueError('Utilisez un identifiant de 3 à 40 lettres, chiffres, points ou tirets.')
+        return value.strip().lower()
+
+    @staticmethod
+    def validate_password(password, confirmation):
+        if not isinstance(password, str) or not 12 <= len(password) <= 1024:
+            raise ValueError('Utilisez un mot de passe de 12 à 1024 caractères.')
+        if password != confirmation:
+            raise ValueError('Les mots de passe ne correspondent pas.')
+
+    @staticmethod
+    def hash(password, salt):
+        return hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1, dklen=32)
+
+    def make_user(self, username, role, password, identifier=None):
+        salt = secrets.token_bytes(16)
+        return {'id': identifier or secrets.token_hex(16), 'username': username, 'role': role, 'salt': salt.hex(), 'digest': self.hash(password, salt).hex()}
+
+    def matches(self, user, password):
+        if not isinstance(password, str) or len(password) > 1024:
+            return False
+        salt = bytes.fromhex(user['salt']) if user else self.dummy_salt
+        digest = self.hash(password, salt)
+        return user is not None and hmac.compare_digest(digest, bytes.fromhex(user['digest']))
+
+    @staticmethod
+    def token(cookie):
+        try:
+            cookies = SimpleCookie(cookie or '')
+            return cookies[COOKIE].value if COOKIE in cookies else ''
+        except CookieError:
+            return ''
+
+    def principal(self, cookie):
+        with self.lock:
+            if not self.enabled:
+                return {'id': 'bootstrap', 'username': '', 'role': 'admin'}
+            token = self.token(cookie)
+            session = self.sessions.get(token)
+            if not session or session['expires'] <= time.monotonic():
+                self.sessions.pop(token, None)
+                return None
+            user = self.users.get(session['userId'])
+            return {key: user[key] for key in ('id', 'username', 'role')} if user else None
+
+    def authenticated(self, cookie):
+        return self.principal(cookie) is not None
+
+    def is_admin(self, cookie):
+        return (self.principal(cookie) or {}).get('role') == 'admin'
+
+    def access(self, cookie):
+        principal = self.principal(cookie)
+        return {'enabled': self.enabled, 'authenticated': principal is not None, 'user': principal, 'canManage': bool(principal and principal['role'] == 'admin')}
+
+    def owner(self, cookie):
+        if not self.principal(cookie):
+            return None
+        return self.token(cookie) if self.enabled else 'bootstrap'
+
+    def active_owners(self):
+        with self.lock:
+            if not self.enabled:
+                return {'bootstrap'}
+            return {token for token, session in self.sessions.items() if session['expires'] > time.monotonic() and session['userId'] in self.users}
 
     def valid_host(self, authority):
         try:
@@ -96,21 +179,6 @@ class Security:
                 return 403, 'Requests from another origin are blocked.'
         return None
 
-    def authenticated(self, cookie):
-        if not self.enabled:
-            return True
-        try:
-            cookies = SimpleCookie(cookie or '')
-            token = cookies[COOKIE].value if COOKIE in cookies else ''
-        except CookieError:
-            return False
-        with self.lock:
-            expiry = self.sessions.get(token, 0)
-            if expiry <= time.monotonic():
-                self.sessions.pop(token, None)
-                return False
-            return True
-
     def allow_attempt(self, address):
         now = time.monotonic()
         with self.lock:
@@ -127,67 +195,129 @@ class Security:
                 self.attempts[key] = (expiry, count + 1)
         return True
 
-    def new_session(self):
-        # Call only while holding the security lock.
+    def new_session(self, identifier):
         now = time.monotonic()
         for key in list(self.sessions):
-            if self.sessions[key] <= now:
+            if self.sessions[key]['expires'] <= now:
                 del self.sessions[key]
         while len(self.sessions) >= 64:
             self.sessions.popitem(last=False)
         token = secrets.token_urlsafe(32)
-        self.sessions[token] = now + SESSION_SECONDS
+        self.sessions[token] = {'expires': now + SESSION_SECONDS, 'userId': identifier}
         return token
 
-    def login(self, address, password):
+    def login(self, address, password, username='admin'):
         if not self.allow_attempt(address):
             return 429, None
         with self.lock:
-            if not isinstance(password, str) or len(password) > 1024 or not self.enabled or not hmac.compare_digest(self.hash(password), self.digest):
+            name = username.strip().lower() if isinstance(username, str) else ''
+            user = next((user for user in self.users.values() if user['username'] == name), None)
+            if not self.matches(user, password):
                 return 401, None
-            return 200, self.new_session()
+            return 200, self.new_session(user['id'])
 
-    def change_password(self, address, current, password, confirmation):
+    def persist(self, users):
+        if self.storage is None:
+            raise ValueError('Le stockage sécurisé du serveur est indisponible.')
+        temporary = None
+        try:
+            self.storage.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', prefix='.web-access-', dir=self.storage.parent, delete=False) as output:
+                temporary = Path(output.name)
+                json.dump({'version': 2, 'algorithm': ALGORITHM, 'users': list(users.values())}, output)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, self.storage)
+        except OSError:
+            raise ValueError('Les comptes n’ont pas pu être enregistrés. Réessayez.') from None
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        self.users = users
+
+    def revoke(self, identifier):
+        for token in list(self.sessions):
+            if self.sessions[token]['userId'] == identifier:
+                del self.sessions[token]
+
+    def change_password(self, address, current, password, confirmation, cookie=None, username='admin'):
         if not self.allow_attempt(address):
             return 429, {'error': 'Trop de tentatives. Attendez une minute.'}, None
-        if not isinstance(password, str) or not 12 <= len(password) <= 1024:
-            return 400, {'error': 'Utilisez un mot de passe de 12 à 1024 caractères.'}, None
-        if password != confirmation:
-            return 400, {'error': 'Les mots de passe ne correspondent pas.'}, None
+        try:
+            self.validate_password(password, confirmation)
+            with self.lock:
+                actor = self.principal(cookie)
+                if not actor or actor['role'] != 'admin':
+                    return 403, {'error': 'Accès réservé aux administrateurs.'}, None
+                if self.enabled:
+                    user = self.users[actor['id']]
+                    if not self.matches(user, current):
+                        return 400, {'error': 'Le mot de passe actuel est incorrect.'}, None
+                    name, identifier = user['username'], user['id']
+                else:
+                    name, identifier = self.username(username), secrets.token_hex(16)
+                updated = dict(self.users)
+                updated[identifier] = self.make_user(name, 'admin', password, identifier)
+                self.persist(updated)
+                self.revoke(identifier)
+                token = self.new_session(identifier)
+                return 200, self.access(self.cookie(token)), token
+        except ValueError as error:
+            return (503 if 'enregistrés' in str(error) or 'stockage' in str(error) else 400), {'error': str(error)}, None
+
+    def public_users(self, cookie):
         with self.lock:
-            if self.enabled and (not isinstance(current, str) or len(current) > 1024 or not hmac.compare_digest(self.hash(current), self.digest)):
-                return 400, {'error': 'Le mot de passe actuel est incorrect.'}, None
-            if self.storage is None:
-                return 503, {'error': 'Le stockage sécurisé du serveur est indisponible.'}, None
-            salt = secrets.token_bytes(16)
-            digest = self.hash(password, salt)
-            record = {'version': 1, 'algorithm': 'scrypt-16384-8-1', 'salt': salt.hex(), 'digest': digest.hex()}
-            temporary = None
-            try:
-                self.storage.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-                with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', prefix='.web-access-', dir=self.storage.parent, delete=False) as output:
-                    temporary = Path(output.name)
-                    json.dump(record, output)
-                    output.flush()
-                    os.fsync(output.fileno())
-                os.replace(temporary, self.storage)
-            except OSError:
-                return 503, {'error': 'Le mot de passe n’a pas pu être enregistré. Réessayez.'}, None
-            finally:
-                if temporary is not None:
-                    temporary.unlink(missing_ok=True)
-            self.salt, self.digest = salt, digest
-            self.sessions.clear()
-            return 200, {'enabled': True, 'authenticated': True}, self.new_session()
+            if not self.is_admin(cookie):
+                raise PermissionError('Accès réservé aux administrateurs.')
+            return {'users': [{key: user[key] for key in ('id', 'username', 'role')} for user in sorted(self.users.values(), key=lambda user: user['username'])]}
+
+    def manage_user(self, cookie, operation, body):
+        with self.lock:
+            actor = self.principal(cookie)
+            if not actor or actor['role'] != 'admin' or not self.enabled:
+                raise PermissionError('Accès réservé aux administrateurs.')
+            updated = dict(self.users)
+            identifier = body.get('id')
+            if operation == 'create':
+                if len(updated) >= 32:
+                    raise ValueError('La limite de 32 utilisateurs est atteinte.')
+                name = self.username(body.get('username'))
+                if any(user['username'] == name for user in updated.values()):
+                    raise ValueError('Cet identifiant est déjà utilisé.')
+                role = body.get('role')
+                if role not in ('admin', 'viewer'):
+                    raise ValueError('Rôle inconnu.')
+                self.validate_password(body.get('password'), body.get('confirmation'))
+                user = self.make_user(name, role, body['password'])
+                updated[user['id']] = user
+            else:
+                if not isinstance(identifier, str) or identifier not in updated:
+                    raise ValueError('Utilisateur introuvable.')
+                if identifier == actor['id']:
+                    raise ValueError('Votre compte administrateur doit rester actif. Utilisez le formulaire de mot de passe pour le modifier.')
+                if operation == 'delete':
+                    del updated[identifier]
+                elif operation == 'update':
+                    role = body.get('role')
+                    if role not in ('admin', 'viewer'):
+                        raise ValueError('Rôle inconnu.')
+                    user = dict(updated[identifier]); user['role'] = role
+                    if body.get('password') or body.get('confirmation'):
+                        self.validate_password(body.get('password'), body.get('confirmation'))
+                        user = self.make_user(user['username'], role, body['password'], identifier)
+                    updated[identifier] = user
+                else:
+                    raise ValueError('Action inconnue.')
+            if not any(user['role'] == 'admin' for user in updated.values()):
+                raise ValueError('Au moins un administrateur doit rester actif.')
+            self.persist(updated)
+            if identifier:
+                self.revoke(identifier)
+            return self.public_users(cookie)
 
     def logout(self, cookie):
-        try:
-            cookies = SimpleCookie(cookie or '')
-            with self.lock:
-                if COOKIE in cookies:
-                    self.sessions.pop(cookies[COOKIE].value, None)
-        except CookieError:
-            pass
+        with self.lock:
+            self.sessions.pop(self.token(cookie), None)
 
     def cookie(self, token):
         return f'{COOKIE}={token or ""}; Path=/; HttpOnly; SameSite=Strict; Max-Age={SESSION_SECONDS if token else 0}' + ('; Secure' if self.public_origin else '')

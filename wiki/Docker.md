@@ -27,4 +27,4 @@ docker compose up -d --build
 
 One image contains the corrected Go engine, Python server, FFmpeg, AI models and web interface. No separate legacy bridge is required.
 
-Version 0.2.0 adds optional web password protection and container hardening. Use **Server settings → Server password** before enabling LAN web access. Passwords configured through the interface are retained in the account data volume. See [Network and privacy](Network-and-privacy) for sessions, HTTPS, allowed hostnames and RTSP limits.
+Web access protection and container hardening are included. Version 0.3.0 adds administrator and read-only accounts: use **Server settings → Users** before enabling LAN web access. Passwords configured through the interface are retained in the account data volume. See [Network and privacy](Network-and-privacy) for sessions, HTTPS, allowed hostnames and RTSP limits.

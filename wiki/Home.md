@@ -12,6 +12,7 @@ A local camera server and Tauri v2 desktop application. Docker and the desktop a
 - [Desktop app: local and remote servers](Desktop)
 - [Cameras, playback and settings](Cameras-and-settings)
 - [Local AI and battery cameras](Local-AI)
+- [Users and permissions](Users-and-permissions)
 - [Network and privacy](Network-and-privacy)
 - [Troubleshooting](Troubleshooting)
 - [Architecture and development](Development)

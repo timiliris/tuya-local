@@ -2,7 +2,8 @@
 const t = (key, variables) => I18N.t(key, variables);
 const $ = (selector, root = document) => root.querySelector(selector);
 const tiles = new Map();
-let accessChanging = false;
+let accessChanging = false, currentAccess = null;
+function applyAccess(access){currentAccess=access;AccessControl.apply(document,access,t);}
 let state = null, focused = null, view = 'grid', toastTimer, currentPage = 'cameras';
 const icon = name => `<svg aria-hidden="true"><use href="#${name}"/></svg>`;
 function toast(message) { const node = $('#toast'); node.textContent = message; node.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => node.hidden = true, 5000); }
@@ -192,6 +193,7 @@ function capture(tile) {
 }
 function addCamera(camera) {
   const node = $('#camera-template').content.firstElementChild.cloneNode(true);
+  $('.tile-settings',node).hidden=!AccessControl.isAdmin(currentAccess);
   $('.tile-settings',node).onclick=()=>settingsPanel.open(camera.deviceId);
   const nav = document.createElement('button'); nav.className = 'camera-nav-button'; nav.innerHTML = '<span class="dot"></span><span></span>';
   $('span:last-child',nav).textContent = camera.deviceName; nav.onclick = () => {changePage('cameras'); changeView('focus',camera.deviceId);};
@@ -266,6 +268,7 @@ $('#language').onchange = async event => {
   changePage(currentPage);
   if(settingsPanel.dialog.open)settingsPanel.render();
   localAI.retranslate();
+  if(currentAccess)applyAccess(currentAccess);
   if(serverSettings.dialog.open)serverSettings.render();
   $('#ptz-status').textContent=t('Disponibilité selon le modèle. Le pilotage peut utiliser le cloud Tuya.');
 };
@@ -280,10 +283,10 @@ $('#sentinel-next').onclick=()=>sentinel.next();
 $('#sentinel-fullscreen').onclick=()=>sentinel.fullscreenScreen();
 $('#sentinel-form').onsubmit=event=>{event.preventDefault();const cameras=[...$('#sentinel-cameras').querySelectorAll('input:checked')].map(input=>input.value);$('#sentinel-error').hidden=sentinel.enter({cameras,mode:$('#sentinel-mode').value,interval:Number($('#sentinel-interval').value),quality:$('#sentinel-quality').value});};
 window.addEventListener('online',()=>{poll();for(const tile of tiles.values())tile.recovery.now();});
-I18N.ready.then(() => {$('#language').value=I18N.language; localAI.initialize(); poll(); setInterval(poll,4000);});
+I18N.ready.then(async () => {$('#language').value=I18N.language;try{applyAccess(await api('/api/access'));$('#access-logout').hidden=!currentAccess.enabled;if(AccessControl.isAdmin(currentAccess))localAI.initialize();poll();setInterval(poll,4000);}catch(error){toast(error.message);}});
 
 const logoutButton=$('#access-logout');
 logoutButton.onclick=async()=>{logoutButton.disabled=true;try{await Promise.all([...tiles.values()].map(tile=>stop(tile)));await api('/api/access/logout',{});location.replace('/');}catch(error){logoutButton.disabled=false;toast(error.message);}};
-fetch('/api/access').then(response=>response.json()).then(access=>{logoutButton.hidden=!access.enabled;}).catch(()=>{});
 
-const serverSettings=new ServerSettings({api,translate:t,onSaving:value=>{accessChanging=value;},beforeSave:async()=>{if(sentinel.active)sentinel.exit();await Promise.all([...tiles.values()].map(tile=>stop(tile)));},onSaved:()=>{$('#access-logout').hidden=false;}});
+
+const serverSettings=new ServerSettings({api,translate:t,onSaving:value=>{accessChanging=value;},beforeSave:async()=>{if(sentinel.active)sentinel.exit();await Promise.all([...tiles.values()].map(tile=>stop(tile)));},onSaved:access=>{$('#access-logout').hidden=false;applyAccess(access);}});

@@ -3,6 +3,7 @@
 - [Desktop](Desktop)
 - [Cameras and settings](Cameras-and-settings)
 - [Local AI](Local-AI)
+- [Users and permissions](Users-and-permissions)
 - [Network and privacy](Network-and-privacy)
 - [Troubleshooting](Troubleshooting)
 - [Development](Development)

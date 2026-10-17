@@ -1,6 +1,6 @@
 [package]
 name = "tuya-local-desktop"
-version = "0.2.1"
+version = "0.3.0"
 description = "Tuya Local desktop client and local server"
 edition = "2021"
 license = "MIT"

@@ -20,7 +20,7 @@ COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY src /app/src
-COPY web/index.html web/app.js web/settings.js web/ai.js web/webrtc.js web/display.js web/recovery.js web/app.css web/i18n.js web/locales.json web/brand.svg web/login.html web/login.css web/login.js web/server-settings.js /app/web/
+COPY web/index.html web/app.js web/settings.js web/ai.js web/webrtc.js web/display.js web/recovery.js web/app.css web/i18n.js web/locales.json web/brand.svg web/login.html web/login.css web/login.js web/server-settings.js web/access.js /app/web/
 COPY LICENSE NOTICE.md /app/licenses/
 COPY vendor/tuya-ipc-terminal/LICENSE /app/licenses/tuya-ipc-terminal-MIT.txt
 COPY vendor/nanodet /app/vendor/nanodet

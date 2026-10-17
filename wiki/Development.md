@@ -27,3 +27,5 @@ The old Tkinter GUI, bundled VLC, Inno Setup installers and legacy HLS/archive m
 ## Documentation images
 
 Run `python scripts/preview_demo.py` to serve the actual interface at `http://127.0.0.1:18889/` and the access-page preview at port 18890. This uses two synthetic cameras and temporary AI storage. It never loads account data, contacts Tuya or opens camera media. Capture the English light/dark views through the browser; publish only these reviewed images in `wiki/images/`. The 18890 password is random and deliberately undisclosed: this view is for documenting the sign-in screen.
+
+For role screenshots, use `python scripts/preview_demo.py --users`, then open `http://localhost:18889/` for the administrator and `http://localhost:18891/` for the reader. These loopback-only fixtures auto-select synthetic sessions; they do not sign in to a real account. Use the `localhost` hostname to keep preview cookies separate from an existing installation on `127.0.0.1`.

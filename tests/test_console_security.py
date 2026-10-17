@@ -68,7 +68,7 @@ class SecurityTests(unittest.TestCase):
         self.assertIn('Max-Age=0', headers['Set-Cookie'])
         self.assertEqual(self.request(headers={'Cookie': cookie})[0], 401)
         cookie = self.login()
-        self.security.sessions[cookie.split('=', 1)[1]] = time.monotonic() - 1
+        self.security.sessions[cookie.split('=', 1)[1]]['expires'] = time.monotonic() - 1
         self.assertEqual(self.request(headers={'Cookie': cookie})[0], 401)
         self.assertEqual(self.request(headers={'Cookie': 'tuya_local_session=forged'})[0], 401)
 
@@ -126,7 +126,7 @@ class SecurityTests(unittest.TestCase):
         connection.endheaders(b'{}')
         response = connection.getresponse()
         self.assertEqual(response.status, 400); response.read(); connection.close()
-        for number in range(64): self.security.sessions[str(number)] = time.monotonic() + 60
+        for number in range(64): self.security.sessions[str(number)] = {'expires': time.monotonic() + 60, 'userId': 'legacy-admin'}
         self.login()
         self.assertEqual(len(self.security.sessions), 64)
         self.assertNotIn('0', self.security.sessions)
@@ -134,7 +134,7 @@ class SecurityTests(unittest.TestCase):
         self.login()
 
     def test_first_password_is_persisted_as_a_verifier_and_survives_restart(self):
-        self.security.digest = None
+        self.security.users.clear()
         payload = {'password': 'first-synthetic-password', 'confirmation': 'first-synthetic-password'}
         status, headers, body = self.request('/api/access/password', 'POST', payload)
         self.assertEqual(status, 200)
@@ -145,7 +145,7 @@ class SecurityTests(unittest.TestCase):
         saved = self.storage.read_text()
         self.assertNotIn(payload['password'], saved)
         self.assertNotIn(cookie, saved)
-        self.assertEqual(set(json.loads(saved)), {'version', 'algorithm', 'salt', 'digest'})
+        self.assertEqual(set(json.loads(saved)), {'version', 'algorithm', 'users'})
         if os.name != 'nt': self.assertEqual(self.storage.stat().st_mode & 0o777, 0o600)
         restarted = Security(self.storage)
         self.assertTrue(restarted.enabled)
@@ -190,17 +190,18 @@ class SecurityTests(unittest.TestCase):
             with self.assertRaises(ValueError): Security(self.storage)
         self.storage.unlink()
         from concurrent.futures import ThreadPoolExecutor
+        cookie = self.login()
         def rotate(number):
             password = 'concurrent-synthetic-' + str(number)
-            return self.security.change_password('client', 'synthetic-test-password', password, password)[0]
+            return self.security.change_password('client', 'synthetic-test-password', password, password, cookie)[0]
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(rotate, (1, 2)))
-        self.assertEqual(sorted(results), [200, 400])
+        self.assertEqual(sorted(results), [200, 403])
         restarted = Security(self.storage)
-        self.assertEqual(restarted.digest, self.security.digest)
+        self.assertEqual(restarted.users, self.security.users)
 
     def test_loopback_installation_can_run_without_a_password(self):
-        self.security.digest = None
+        self.security.users.clear()
         self.assertEqual(self.request('/api/state')[0], 200)
         self.assertEqual(self.request('/api/cameras/refresh', 'POST', {}, {'Origin': 'http://' + self.host})[0], 200)
 

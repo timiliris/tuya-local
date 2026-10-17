@@ -70,14 +70,14 @@ class Players:
         self.lock = threading.RLock()
         self.items = {}
 
-    def create(self, url: str, transport: str = 'mp4') -> str:
+    def create(self, url: str, transport: str = 'mp4', owner=None) -> str:
         if transport not in ('mp4', 'webrtc'):
             raise ValueError('Transport vidéo inconnu.')
         with self.lock:
             if len(self.items) >= 8:
                 raise ValueError('Huit lecteurs sont déjà ouverts. Arrête un lecteur pour continuer.')
             token = secrets.token_urlsafe(24)
-            self.items[token] = {'url': url, 'seen': time.monotonic(), 'process': None, 'claimed': False, 'transport': transport}
+            self.items[token] = {'url': url, 'seen': time.monotonic(), 'process': None, 'claimed': False, 'transport': transport, 'owner': owner}
             return token
 
     def touch(self, token: str) -> bool:
@@ -163,9 +163,9 @@ class Players:
                     proc.kill()
                 proc.wait(timeout=2)
 
-    def reap(self):
+    def reap(self, owners=None):
         with self.lock:
-            expired = [token for token, item in self.items.items() if time.monotonic() - item['seen'] > PLAYER_IDLE_TIMEOUT or item['process'] is not None and item['process'].poll() is not None]
+            expired = [token for token, item in self.items.items() if (owners is not None and item.get('owner') not in owners) or time.monotonic() - item['seen'] > PLAYER_IDLE_TIMEOUT or item['process'] is not None and item['process'].poll() is not None]
         for token in expired:
             self.stop(token)
 
@@ -237,6 +237,23 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def owns_player(self, token):
+        if not isinstance(token, str):
+            return False
+        with players.lock:
+            return token in players.items and players.items[token].get('owner') == self.server.security.owner(self.headers.get('Cookie'))
+
+    def clean_sessions(self):
+        threading.Thread(target=lambda: players.reap(self.server.security.active_owners()), daemon=True).start()
+
+    def user_state(self):
+        state = console_state(upstream('/api/state'))
+        if not self.server.security.is_admin(self.headers.get('Cookie')):
+            state.update(hasQr=False, qrId=None, regions={}, region=None)
+            for camera in state['cameras']:
+                camera.update(rtspHd='', rtspSd='')
+        return state
+
     def session_response(self, token, payload):
         data = json.dumps(payload).encode()
         self.send_response(200)
@@ -255,12 +272,16 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/health':
                 return self.json(200, {'service': 'tuya-local', 'localOnly': True})
             if path == '/api/access':
-                return self.json(200, {'enabled': self.server.security.enabled, 'authenticated': self.server.security.authenticated(self.headers.get('Cookie'))})
+                return self.json(200, self.server.security.access(self.headers.get('Cookie')))
             public = {'/login.js', '/login.css', '/brand.svg', '/locales.json', '/i18n.js'}
             if not self.server.security.authenticated(self.headers.get('Cookie')) and path not in public:
                 if path in {'/', '/index.html'}:
                     return self.send_bytes((WEB / 'login.html').read_bytes(), 'text/html; charset=utf-8')
                 return self.json(401, {'error': 'Authentication required.'})
+            if path.startswith('/api/') and path != '/api/state' and not self.server.security.is_admin(self.headers.get('Cookie')):
+                return self.json(403, {'error': 'Accès réservé aux administrateurs.'})
+            if path == '/api/access/users':
+                return self.json(200, self.server.security.public_users(self.headers.get('Cookie')))
             if path in {'/api/ai/state','/api/ai/events'}:
                 devices = {cam['deviceId'] for cam in runtime.state().get('cameras', [])}
                 return self.json(200, ai_service().state(devices) if path.endswith('/state') else ai_service().events(devices))
@@ -270,12 +291,15 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/diagnostics':
                 return self.json(200, runtime.diagnostics())
             if path == '/api/state':
-                return self.json(200, console_state(upstream('/api/state')))
+                return self.json(200, self.user_state())
             if path == '/api/qr.png':
                 data = runtime.qr()
                 return self.send_bytes(data, 'image/png')
             if path.startswith('/stream/') and path.endswith('.mp4'):
-                return self.stream(path.removeprefix('/stream/').removesuffix('.mp4'))
+                token = path.removeprefix('/stream/').removesuffix('.mp4')
+                if not self.owns_player(token):
+                    return self.json(404, {'error': 'Lecteur introuvable.'})
+                return self.stream(token)
             from runtime_config import WEB_ASSETS
             assets = {'/' + name: name for name in WEB_ASSETS}
             assets['/'] = 'index.html'
@@ -285,6 +309,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_bytes(file.read_bytes(), mimetypes.guess_type(str(file))[0] or 'text/plain')
         except (BrokenPipeError, ConnectionResetError):
             pass
+        except PermissionError as exc:
+            self.json(403, {'error': str(exc)})
         except Exception:
             self.json(502, {'error': 'Le moteur de caméras ne répond pas. Vérifie le serveur de bridge.'})
 
@@ -314,29 +340,29 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('Requête invalide.')
             security = self.server.security
             if path == '/api/access/login':
-                status, token = security.login(self.client_address[0], body.get('password'))
+                status, token = security.login(self.client_address[0], body.get('password'), body.get('username', 'admin'))
                 if token:
                     return self.session_response(token, {})
                 return self.json(status, {'error': 'Too many attempts. Wait one minute.' if status == 429 else 'Incorrect password.'})
             if not security.authenticated(self.headers.get('Cookie')):
                 return self.json(401, {'error': 'Authentication required.'})
+            viewer_actions = {'/api/player/start', '/api/player/offer', '/api/player/heartbeat', '/api/player/stop', '/api/access/logout'}
+            if path not in viewer_actions and not security.is_admin(self.headers.get('Cookie')):
+                return self.json(403, {'error': 'Accès réservé aux administrateurs.'})
+            if path.startswith('/api/access/users/'):
+                result = security.manage_user(self.headers.get('Cookie'), path.removeprefix('/api/access/users/'), body)
+                self.clean_sessions()
+                return self.json(200, result)
             if path == '/api/access/password':
-                status, result, token = security.change_password(self.client_address[0], body.get('currentPassword'), body.get('password'), body.get('confirmation'))
+                status, result, token = security.change_password(self.client_address[0], body.get('currentPassword'), body.get('password'), body.get('confirmation'), self.headers.get('Cookie'), body.get('username', 'admin'))
                 if not token:
                     return self.json(status, result)
-                with players.lock:
-                    active = list(players.items)
                 self.session_response(token, result)
-                def close_previous_players():
-                    for player in active:
-                        try:
-                            players.stop(player)
-                        except OSError:
-                            pass
-                threading.Thread(target=close_previous_players, daemon=True).start()
+                self.clean_sessions()
                 return
             if path == '/api/access/logout':
                 security.logout(self.headers.get('Cookie'))
+                self.clean_sessions()
                 return self.session_response(None, {})
             if path in {'/api/ai/config','/api/ai/analyze','/api/ai/events/clear'}:
                 if path.endswith('/clear'):
@@ -358,8 +384,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not state.get('rtsp', {}).get('running'):
                     upstream('/api/rtsp/start', {})
                 transport = body.get('transport', 'mp4')
-                token = players.create(url, transport)
+                token = players.create(url, transport, security.owner(self.headers.get('Cookie')))
                 return self.json(200, {'token': token, 'url': f'/stream/{token}.mp4', 'transport': transport})
+            if path in {'/api/player/offer', '/api/player/heartbeat', '/api/player/stop'} and not self.owns_player(body.get('token')):
+                return self.json(404, {'error': 'Lecteur introuvable.'})
             if path == '/api/player/offer':
                 return self.json(200, players.offer(body.get('token'), body.get('sdp')))
             if path == '/api/player/heartbeat':
@@ -371,6 +399,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = upstream(path, body)
                 return self.json(200, result if path == '/api/ptz/move' or path.startswith('/api/settings/') else console_state(result))
             return self.json(404, {'error': 'Action inconnue.'})
+        except PermissionError as exc:
+            self.json(403, {'error': str(exc)})
         except (ValueError, TypeError) as exc:
             self.json(400, {'error': str(exc)})
         except Exception:
@@ -414,7 +444,7 @@ def main(stop_event=None):
     def reap():
         while True:
             time.sleep(10)
-            players.reap()
+            players.reap(security.active_owners())
             if _ai is not None:
                 _ai.cleanup()
     threading.Thread(target=reap, daemon=True).start()

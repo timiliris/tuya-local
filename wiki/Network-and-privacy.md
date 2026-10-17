@@ -17,13 +17,13 @@ Camera VLANs must route the necessary traffic. An RTSP URL in a browser tab is n
 
 ## Web access protection
 
-Open **Server settings → Server password** in Tuya Local to set a password, or to change it later. Choose a unique password of at least 12 characters and confirm it. Changing an existing password also requires the current password. No `.env` edit or restart is needed.
+Open **Server settings** to create the first administrator or manage user accounts. Existing single passwords migrate to username `admin`, keeping the same password. Choose a unique password of at least 12 characters. No `.env` edit or restart is needed. See [Users and permissions](Users-and-permissions) for the role matrix and account management.
 
-![Server password settings](https://raw.githubusercontent.com/timiliris/tuya-local/main/wiki/images/server-settings.png)
+![User settings](https://raw.githubusercontent.com/timiliris/tuya-local/main/wiki/images/users.png)
 
-The server stores only a random salt and a scrypt verifier in its private `web-access.json` file. It writes the file atomically with owner-only permissions on POSIX. Docker keeps it in the existing account data volume; desktop uses its isolated app data directory. The saved password survives upgrades and restarts and takes precedence over environment-based initialization. An invalid saved verifier stops startup instead of silently removing protection.
+The server stores usernames, roles, random salts and scrypt verifiers in its private `web-access.json` file. It writes the file atomically with owner-only permissions on POSIX. Docker keeps it in the existing account data volume; desktop uses its isolated app data directory. The saved password survives upgrades and restarts and takes precedence over environment-based initialization. An invalid saved verifier stops startup instead of silently removing protection.
 
-Setting or changing the password revokes previous sessions and stops existing web viewers. The initiating browser receives a replacement session and stays signed in. Close and reopen the viewer if another device was signed out. The first password should be set while access is restricted to localhost or a trusted network.
+Setting the first password closes unauthenticated viewers. Changing your own password revokes your previous sessions and players; the initiating browser receives a replacement session and stays signed in. Changes to another account revoke only that account’s sessions and players. Close and reopen the viewer if another device was signed out. The first password should be set while access is restricted to localhost or a trusted network.
 
 For automated initial deployment, `TUYA_ACCESS_PASSWORD` in the private `.env` remains supported. Do not put a password in a URL, command-line argument, issue, screenshot or Git commit. Protect `.env` with owner-only permissions.
 
@@ -33,7 +33,7 @@ An alternative is `TUYA_ACCESS_PASSWORD_FILE`: mount a private file or Docker se
 
 If a password is forgotten, stop the server and move its private `web-access.json` out of the data directory using local administrator access. Restart only on localhost or a protected network, then configure a new password. If an environment password is configured, it becomes the fallback again. This recovery intentionally requires access to the server’s files.
 
-Sessions use random server-side tokens and HttpOnly, SameSite=Strict cookies. They expire after 12 hours and are invalidated on logout or server restart. Password verification uses scrypt; login attempts and session counts are bounded. Passwords and session tokens are never returned by the API. The public `/api/health` endpoint discloses only the service identifier and local-video policy.
+Sessions use random server-side tokens and HttpOnly, SameSite=Strict cookies. They expire after 12 hours and are invalidated on logout, account changes or server restart. Password verification uses scrypt; login attempts and session counts are bounded. Passwords and session tokens are never returned by the API. The public `/api/health` endpoint discloses only the service identifier and local-video policy.
 
 The password is optional for the default localhost installation. **It protects HTTP access, not direct RTSP clients such as VLC.** Keep RTSP bound to localhost or behind a trusted network/VPN. A web password does not encrypt HTTP: use HTTPS or a trusted VPN for another computer.
 
