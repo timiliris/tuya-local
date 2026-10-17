@@ -23,3 +23,6 @@ compose.test.yml
 **/ai-events.sqlite*
 web/live
 hls
+
+**/web-access.json
+**/.web-access-*

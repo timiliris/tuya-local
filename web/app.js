@@ -2,6 +2,7 @@
 const t = (key, variables) => I18N.t(key, variables);
 const $ = (selector, root = document) => root.querySelector(selector);
 const tiles = new Map();
+let accessChanging = false;
 let state = null, focused = null, view = 'grid', toastTimer, currentPage = 'cameras';
 const icon = name => `<svg aria-hidden="true"><use href="#${name}"/></svg>`;
 function toast(message) { const node = $('#toast'); node.textContent = message; node.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => node.hidden = true, 5000); }
@@ -9,10 +10,10 @@ async function api(path, body, options = {}) {
   const controller=new AbortController();
   const abort=()=>controller.abort();options.signal?.addEventListener('abort',abort,{once:true});
   if(options.signal?.aborted)controller.abort();
-  const timeout=setTimeout(abort,path.startsWith('/api/settings/')?100000:path==='/api/player/offer'?115000:10000);
+  const timeout=setTimeout(abort,path==='/api/access/password'?30000:path.startsWith('/api/settings/')?100000:path==='/api/player/offer'?115000:10000);
   try {
     const response = await fetch(path, {method: body === undefined ? 'GET' : 'POST', headers: {'Content-Type':'application/json'}, body: body === undefined ? undefined : JSON.stringify(body),signal:controller.signal});
-    if(response.status===401){location.replace('/');throw new Error(t('Session expirée. Reconnectez-vous.'));}
+    if(response.status===401){if(!accessChanging)location.replace('/');throw new Error(t('Session expirée. Reconnectez-vous.'));}
     const result = await response.json();
     if (!response.ok) throw new Error(t(result.error) || t('La demande a échoué.'));
     return result;
@@ -231,7 +232,7 @@ function render(next) {
   if(sentinel.active)sentinel.layout();
 }
 let polling=false;
-async function poll() {if(polling)return;polling=true;try {render(await api('/api/state'));} catch {$('#server-label').textContent=t('Bridge injoignable'); $('#server-dot').className='dot amber'; $('#page-subtitle').textContent=t('Impossible de joindre le bridge. Vérifie que le serveur Docker est démarré.');}finally{polling=false;} }
+async function poll() {if(polling || accessChanging)return;polling=true;try {render(await api('/api/state'));} catch {$('#server-label').textContent=t('Bridge injoignable'); $('#server-dot').className='dot amber'; $('#page-subtitle').textContent=t('Impossible de joindre le bridge. Vérifie que le serveur Docker est démarré.');}finally{polling=false;} }
 $('#nav-ai').onclick=()=>{changePage('ai');localAI.open();};
 $('#nav-cameras').onclick = () => changePage('cameras'); $('#nav-diagnostics').onclick = () => changePage('diagnostics');
 $('#grid-view').onclick = () => changeView('grid'); $('#focus-view').onclick = () => changeView('focus');
@@ -265,6 +266,7 @@ $('#language').onchange = async event => {
   changePage(currentPage);
   if(settingsPanel.dialog.open)settingsPanel.render();
   localAI.retranslate();
+  if(serverSettings.dialog.open)serverSettings.render();
   $('#ptz-status').textContent=t('Disponibilité selon le modèle. Le pilotage peut utiliser le cloud Tuya.');
 };
 const localAI=new LocalAIConsole({api,tiles,translate:t,cameras:()=>state?.cameras || []});
@@ -280,4 +282,8 @@ $('#sentinel-form').onsubmit=event=>{event.preventDefault();const cameras=[...$(
 window.addEventListener('online',()=>{poll();for(const tile of tiles.values())tile.recovery.now();});
 I18N.ready.then(() => {$('#language').value=I18N.language; localAI.initialize(); poll(); setInterval(poll,4000);});
 
-fetch('/api/access').then(response=>response.json()).then(access=>{const button=$('#access-logout');button.hidden=!access.enabled;button.onclick=async()=>{button.disabled=true;try{await Promise.all([...tiles.values()].map(tile=>stop(tile)));await api('/api/access/logout',{});location.replace('/');}catch(error){button.disabled=false;toast(error.message);}};}).catch(()=>{});
+const logoutButton=$('#access-logout');
+logoutButton.onclick=async()=>{logoutButton.disabled=true;try{await Promise.all([...tiles.values()].map(tile=>stop(tile)));await api('/api/access/logout',{});location.replace('/');}catch(error){logoutButton.disabled=false;toast(error.message);}};
+fetch('/api/access').then(response=>response.json()).then(access=>{logoutButton.hidden=!access.enabled;}).catch(()=>{});
+
+const serverSettings=new ServerSettings({api,translate:t,onSaving:value=>{accessChanging=value;},beforeSave:async()=>{if(sentinel.active)sentinel.exit();await Promise.all([...tiles.values()].map(tile=>stop(tile)));},onSaved:()=>{$('#access-logout').hidden=false;}});

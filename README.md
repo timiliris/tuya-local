@@ -32,6 +32,6 @@ Open [Tuya Local](http://127.0.0.1:18788/) and scan the QR code with Tuya / Smar
 
 Wiki sources live in `wiki/`. Old guides, translations and installers are preserved through [Archives](https://github.com/timiliris/tuya-local/wiki/Archives).
 
-Video and AI inference stay local; account login, signaling, wake-up and some commands still use Tuya. Optional password protection covers the web interface and its API. Localhost access remains the default. See [security and access](https://github.com/timiliris/tuya-local/wiki/Network-and-privacy) before enabling LAN access.
+Video and AI inference stay local; account login, signaling, wake-up and some commands still use Tuya. Set or change the optional web/API password in **Server settings**, without editing configuration files. Localhost access remains the default. See [security and access](https://github.com/timiliris/tuya-local/wiki/Network-and-privacy) before enabling LAN access.
 
 Account sessions, device keys and private thumbnails are excluded from this repository. Based on [DanEng1982/tuya-rtsp-bridge](https://github.com/DanEng1982/tuya-rtsp-bridge), with the [seydx/tuya-ipc-terminal](https://github.com/seydx/tuya-ipc-terminal) engine. Required licenses and attributions: [LICENSE](LICENSE), [NOTICE.md](NOTICE.md).

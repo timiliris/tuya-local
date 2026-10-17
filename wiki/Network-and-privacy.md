@@ -15,13 +15,23 @@ Account login, wake-up and signaling still use Tuya. Camera settings and PTZ may
 
 Camera VLANs must route the necessary traffic. An RTSP URL in a browser tab is not a substitute for a compatible player such as VLC.
 
-## Web access protection (0.2.0)
+## Web access protection
 
-The web interface and API support an optional server password. To enable it, set `TUYA_ACCESS_PASSWORD` to a unique password of at least 12 characters in the private `.env` file and recreate the container. Do not put a password in a URL, command-line argument, issue, screenshot or Git commit. Protect `.env` with owner-only permissions.
+Open **Server settings → Server password** in Tuya Local to set a password, or to change it later. Choose a unique password of at least 12 characters and confirm it. Changing an existing password also requires the current password. No `.env` edit or restart is needed.
+
+![Server password settings](https://raw.githubusercontent.com/timiliris/tuya-local/main/wiki/images/server-settings.png)
+
+The server stores only a random salt and a scrypt verifier in its private `web-access.json` file. It writes the file atomically with owner-only permissions on POSIX. Docker keeps it in the existing account data volume; desktop uses its isolated app data directory. The saved password survives upgrades and restarts and takes precedence over environment-based initialization. An invalid saved verifier stops startup instead of silently removing protection.
+
+Setting or changing the password revokes previous sessions and stops existing web viewers. The initiating browser receives a replacement session and stays signed in. Close and reopen the viewer if another device was signed out. The first password should be set while access is restricted to localhost or a trusted network.
+
+For automated initial deployment, `TUYA_ACCESS_PASSWORD` in the private `.env` remains supported. Do not put a password in a URL, command-line argument, issue, screenshot or Git commit. Protect `.env` with owner-only permissions.
 
 An alternative is `TUYA_ACCESS_PASSWORD_FILE`: mount a private file or Docker secret read-only and set this environment variable to its container path. The file takes precedence over the environment password. An invalid or unreadable configured secret stops startup; it does not silently disable authentication.
 
 ![Server sign-in](https://raw.githubusercontent.com/timiliris/tuya-local/main/wiki/images/server-access.png)
+
+If a password is forgotten, stop the server and move its private `web-access.json` out of the data directory using local administrator access. Restart only on localhost or a protected network, then configure a new password. If an environment password is configured, it becomes the fallback again. This recovery intentionally requires access to the server’s files.
 
 Sessions use random server-side tokens and HttpOnly, SameSite=Strict cookies. They expire after 12 hours and are invalidated on logout or server restart. Password verification uses scrypt; login attempts and session counts are bounded. Passwords and session tokens are never returned by the API. The public `/api/health` endpoint discloses only the service identifier and local-video policy.
 

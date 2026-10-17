@@ -24,7 +24,7 @@ if __name__ == '__main__':
     with tempfile.TemporaryDirectory(prefix='tuya-docs-') as data:
         console.runtime = Demo()
         console._ai = LocalAI(Path(data))
-        server = ConsoleHTTPServer(('127.0.0.1', 18889), console.Handler)
+        server = ConsoleHTTPServer(('127.0.0.1', 18889), console.Handler, Security(Path(data) / 'web-access.json'))
         protected = Security()
         protected.digest = protected.hash(os.urandom(32).hex())
         login = ConsoleHTTPServer(('127.0.0.1', 18890), console.Handler, protected)

@@ -27,4 +27,4 @@ docker compose up -d --build
 
 One image contains the corrected Go engine, Python server, FFmpeg, AI models and web interface. No separate legacy bridge is required.
 
-Version 0.2.0 adds optional web password protection and container hardening. Set `TUYA_ACCESS_PASSWORD` in your private `.env` before enabling LAN web access. See [Network and privacy](Network-and-privacy) for sessions, HTTPS, allowed hostnames and RTSP limits.
+Version 0.2.0 adds optional web password protection and container hardening. Use **Server settings → Server password** before enabling LAN web access. Passwords configured through the interface are retained in the account data volume. See [Network and privacy](Network-and-privacy) for sessions, HTTPS, allowed hostnames and RTSP limits.

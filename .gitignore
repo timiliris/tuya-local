@@ -36,3 +36,7 @@ hls/
 **/protect_session.json
 **/ai-config.json
 **/ai-events.sqlite*
+
+# Server-owned access verifiers (never publish authentication material)
+**/web-access.json
+**/.web-access-*

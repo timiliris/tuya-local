@@ -237,6 +237,16 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def session_response(self, token, payload):
+        data = json.dumps(payload).encode()
+        self.send_response(200)
+        self.send_header('Set-Cookie', self.server.security.cookie(token))
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self):
         if not self.guard():
             return
@@ -306,26 +316,28 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/access/login':
                 status, token = security.login(self.client_address[0], body.get('password'))
                 if token:
-                    self.send_response(200)
-                    self.send_header('Set-Cookie', security.cookie(token))
-                    self.send_header('Content-Length', '2')
-                    self.send_header('Content-Type', 'application/json')
-                    self.send_header('Cache-Control', 'no-store')
-                    self.end_headers()
-                    self.wfile.write(b'{}')
-                    return
+                    return self.session_response(token, {})
                 return self.json(status, {'error': 'Too many attempts. Wait one minute.' if status == 429 else 'Incorrect password.'})
             if not security.authenticated(self.headers.get('Cookie')):
                 return self.json(401, {'error': 'Authentication required.'})
+            if path == '/api/access/password':
+                status, result, token = security.change_password(self.client_address[0], body.get('currentPassword'), body.get('password'), body.get('confirmation'))
+                if not token:
+                    return self.json(status, result)
+                with players.lock:
+                    active = list(players.items)
+                self.session_response(token, result)
+                def close_previous_players():
+                    for player in active:
+                        try:
+                            players.stop(player)
+                        except OSError:
+                            pass
+                threading.Thread(target=close_previous_players, daemon=True).start()
+                return
             if path == '/api/access/logout':
                 security.logout(self.headers.get('Cookie'))
-                self.send_response(200)
-                self.send_header('Set-Cookie', security.cookie(None))
-                self.send_header('Content-Length', '2')
-                self.send_header('Cache-Control', 'no-store')
-                self.end_headers()
-                self.wfile.write(b'{}')
-                return
+                return self.session_response(None, {})
             if path in {'/api/ai/config','/api/ai/analyze','/api/ai/events/clear'}:
                 if path.endswith('/clear'):
                     return self.json(200, ai_service().clear())
@@ -390,7 +402,8 @@ def main(stop_event=None):
     global runtime
     if os.name != 'nt':
         os.umask(0o077)
-    security = Security()
+    from paths import tuya_data
+    security = Security(tuya_data() / "web-access.json")
     from console_runtime import Runtime
     runtime = Runtime()
     runtime.start()

@@ -5,6 +5,7 @@ import os
 import sys
 import threading
 import time
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -16,7 +17,9 @@ class SecurityTests(unittest.TestCase):
     def setUp(self):
         self.env = patch.dict(os.environ, {'TUYA_ACCESS_PASSWORD': 'synthetic-test-password', 'TUYA_ACCESS_PASSWORD_FILE': '', 'TUYA_PUBLIC_ORIGIN': '', 'TUYA_ALLOWED_HOSTS': ''})
         self.env.start()
-        self.security = Security()
+        self.directory = tempfile.TemporaryDirectory()
+        self.storage = Path(self.directory.name) / "web-access.json"
+        self.security = Security(self.storage)
         self.server = ConsoleHTTPServer(('127.0.0.1', 0), console.Handler, self.security)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -28,7 +31,7 @@ class SecurityTests(unittest.TestCase):
 
     def tearDown(self):
         self.server.shutdown(); self.server.server_close(); self.thread.join()
-        self.runtime.stop(); self.env.stop()
+        self.runtime.stop(); self.env.stop(); self.directory.cleanup()
 
     def request(self, path='/api/state', method='GET', body=None, headers=None):
         connection = http.client.HTTPConnection(self.host, timeout=3)
@@ -49,7 +52,7 @@ class SecurityTests(unittest.TestCase):
         status, _, body = self.request('/api/health')
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body), {'service': 'tuya-local', 'localOnly': True})
-        for path in ('/api/state', '/api/qr.png', '/api/diagnostics', '/api/ai/events', '/api/ai/snapshot/example.jpg', '/stream/example.mp4'):
+        for path in ('/api/state', '/api/qr.png', '/api/diagnostics', '/server-settings.js', '/api/ai/events', '/api/ai/snapshot/example.jpg', '/stream/example.mp4'):
             self.assertEqual(self.request(path)[0], 401, path)
         self.fake.state.assert_not_called()
         self.assertIn(b'id="login"', self.request('/')[2])
@@ -129,6 +132,72 @@ class SecurityTests(unittest.TestCase):
         self.assertNotIn('0', self.security.sessions)
         self.security.attempts = type(self.security.attempts)({'127.0.0.1': (time.monotonic() - 1, 5), '*': (time.monotonic() - 1, 30)})
         self.login()
+
+    def test_first_password_is_persisted_as_a_verifier_and_survives_restart(self):
+        self.security.digest = None
+        payload = {'password': 'first-synthetic-password', 'confirmation': 'first-synthetic-password'}
+        status, headers, body = self.request('/api/access/password', 'POST', payload)
+        self.assertEqual(status, 200)
+        cookie = headers['Set-Cookie'].split(';')[0]
+        self.assertTrue(json.loads(body)['enabled'])
+        self.assertEqual(self.request(headers={'Cookie': cookie})[0], 200)
+        self.assertEqual(self.request()[0], 401)
+        saved = self.storage.read_text()
+        self.assertNotIn(payload['password'], saved)
+        self.assertNotIn(cookie, saved)
+        self.assertEqual(set(json.loads(saved)), {'version', 'algorithm', 'salt', 'digest'})
+        if os.name != 'nt': self.assertEqual(self.storage.stat().st_mode & 0o777, 0o600)
+        restarted = Security(self.storage)
+        self.assertTrue(restarted.enabled)
+        self.assertEqual(restarted.login('client', payload['password'])[0], 200)
+        self.assertEqual(restarted.login('client', 'synthetic-test-password')[0], 401)
+        self.assertFalse(restarted.authenticated(cookie))
+
+    def test_rotation_requires_current_password_revokes_sessions_and_keeps_initiator(self):
+        cookie = self.login()
+        other = self.login()
+        payload = {'currentPassword': 'wrong', 'password': 'next-synthetic-password', 'confirmation': 'next-synthetic-password'}
+        status, _, _ = self.request('/api/access/password', 'POST', payload, {'Cookie': cookie})
+        self.assertEqual(status, 400)
+        self.assertFalse(self.storage.exists())
+        self.assertTrue(self.security.authenticated(other))
+        payload['currentPassword'] = 'synthetic-test-password'
+        status, headers, _ = self.request('/api/access/password', 'POST', payload, {'Cookie': cookie})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.request(headers={'Cookie': cookie})[0], 401)
+        self.assertEqual(self.request(headers={'Cookie': other})[0], 401)
+        self.assertEqual(self.request(headers={'Cookie': headers['Set-Cookie'].split(';')[0]})[0], 200)
+        self.assertEqual(self.request('/api/access/password', 'POST', payload)[0], 401)
+
+    def test_invalid_and_failed_password_changes_leave_access_unchanged(self):
+        cookie = self.login()
+        for password, confirmation in [('short', 'short'), ('valid-synthetic-password', 'mismatch'), ('x' * 1025, 'x' * 1025)]:
+            payload = {'currentPassword': 'synthetic-test-password', 'password': password, 'confirmation': confirmation}
+            self.assertEqual(self.request('/api/access/password', 'POST', payload, {'Cookie': cookie})[0], 400)
+            self.assertFalse(self.storage.exists())
+        self.security.attempts.clear()
+        payload = {'currentPassword': 'synthetic-test-password', 'password': 'next-synthetic-password', 'confirmation': 'next-synthetic-password'}
+        with patch('console_security.os.replace', side_effect=OSError('unwritable')):
+            self.assertEqual(self.request('/api/access/password', 'POST', payload, {'Cookie': cookie})[0], 503)
+        self.assertFalse(self.storage.exists())
+        self.assertEqual(list(Path(self.directory.name).iterdir()), [])
+        self.assertTrue(self.security.authenticated(cookie))
+        self.assertEqual(self.security.login('client', 'synthetic-test-password')[0], 200)
+
+    def test_invalid_stored_protection_fails_closed_and_rotation_is_atomic(self):
+        for record in ({}, [], {'version': 1, 'algorithm': 'scrypt-16384-8-1', 'salt': 'bad', 'digest': 'invalid'}):
+            self.storage.write_text(json.dumps(record))
+            with self.assertRaises(ValueError): Security(self.storage)
+        self.storage.unlink()
+        from concurrent.futures import ThreadPoolExecutor
+        def rotate(number):
+            password = 'concurrent-synthetic-' + str(number)
+            return self.security.change_password('client', 'synthetic-test-password', password, password)[0]
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(rotate, (1, 2)))
+        self.assertEqual(sorted(results), [200, 400])
+        restarted = Security(self.storage)
+        self.assertEqual(restarted.digest, self.security.digest)
 
     def test_loopback_installation_can_run_without_a_password(self):
         self.security.digest = None

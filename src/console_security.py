@@ -5,6 +5,8 @@ from collections import OrderedDict
 import hashlib
 import hmac
 import ipaddress
+import json
+import tempfile
 import os
 from pathlib import Path
 import secrets
@@ -19,17 +21,32 @@ COOKIE = 'tuya_local_session'
 
 
 class Security:
-    def __init__(self):
-        password = os.environ.get('TUYA_ACCESS_PASSWORD', '')
-        password_file = os.environ.get('TUYA_ACCESS_PASSWORD_FILE', '')
-        if password_file:
-            password = Path(password_file).read_text().rstrip('\r\n')
-            if not password:
-                raise ValueError('The configured access password file is empty')
-        if password and not 12 <= len(password) <= 1024:
-            raise ValueError('The access password must contain 12 to 1024 characters')
+    def __init__(self, storage=None):
+        self.storage = Path(storage) if storage is not None else None
         self.salt = secrets.token_bytes(16)
-        self.digest = self.hash(password) if password else None
+        self.digest = None
+        if self.storage is not None and self.storage.exists():
+            try:
+                record = json.loads(self.storage.read_text())
+                if record.get('version') != 1 or record.get('algorithm') != 'scrypt-16384-8-1':
+                    raise ValueError()
+                salt = bytes.fromhex(record['salt'])
+                digest = bytes.fromhex(record['digest'])
+                if len(salt) != 16 or len(digest) != 32:
+                    raise ValueError()
+                self.salt, self.digest = salt, digest
+            except (ValueError, KeyError, TypeError, AttributeError):
+                raise ValueError('Invalid saved access protection; repair the private configuration before startup') from None
+        else:
+            password = os.environ.get('TUYA_ACCESS_PASSWORD', '')
+            password_file = os.environ.get('TUYA_ACCESS_PASSWORD_FILE', '')
+            if password_file:
+                password = Path(password_file).read_text().rstrip('\r\n')
+                if not password:
+                    raise ValueError('The configured access password file is empty')
+            if password and not 12 <= len(password) <= 1024:
+                raise ValueError('The access password must contain 12 to 1024 characters')
+            self.digest = self.hash(password) if password else None
         self.public_origin = os.environ.get('TUYA_PUBLIC_ORIGIN', '').rstrip('/')
         if self.public_origin:
             parsed = urlsplit(self.public_origin)
@@ -46,8 +63,8 @@ class Security:
     def enabled(self):
         return self.digest is not None
 
-    def hash(self, password):
-        return hashlib.scrypt(password.encode(), salt=self.salt, n=16384, r=8, p=1, dklen=32)
+    def hash(self, password, salt=None):
+        return hashlib.scrypt(password.encode(), salt=self.salt if salt is None else salt, n=16384, r=8, p=1, dklen=32)
 
     def valid_host(self, authority):
         try:
@@ -94,7 +111,7 @@ class Security:
                 return False
             return True
 
-    def login(self, address, password):
+    def allow_attempt(self, address):
         now = time.monotonic()
         with self.lock:
             for key in list(self.attempts):
@@ -102,23 +119,66 @@ class Security:
                     del self.attempts[key]
             for key, limit in ((address, 5), ('*', 30)):
                 if self.attempts.get(key, (0, 0))[1] >= limit:
-                    return 429, None
+                    return False
             if len(self.attempts) >= 256:
-                return 429, None
+                return False
             for key in (address, '*'):
                 expiry, count = self.attempts.get(key, (now + 60, 0))
                 self.attempts[key] = (expiry, count + 1)
-        if not isinstance(password, str) or len(password) > 1024 or not self.enabled or not hmac.compare_digest(self.hash(password), self.digest):
-            return 401, None
+        return True
+
+    def new_session(self):
+        # Call only while holding the security lock.
+        now = time.monotonic()
+        for key in list(self.sessions):
+            if self.sessions[key] <= now:
+                del self.sessions[key]
+        while len(self.sessions) >= 64:
+            self.sessions.popitem(last=False)
         token = secrets.token_urlsafe(32)
+        self.sessions[token] = now + SESSION_SECONDS
+        return token
+
+    def login(self, address, password):
+        if not self.allow_attempt(address):
+            return 429, None
         with self.lock:
-            for key in list(self.sessions):
-                if self.sessions[key] <= now:
-                    del self.sessions[key]
-            while len(self.sessions) >= 64:
-                self.sessions.popitem(last=False)
-            self.sessions[token] = now + SESSION_SECONDS
-        return 200, token
+            if not isinstance(password, str) or len(password) > 1024 or not self.enabled or not hmac.compare_digest(self.hash(password), self.digest):
+                return 401, None
+            return 200, self.new_session()
+
+    def change_password(self, address, current, password, confirmation):
+        if not self.allow_attempt(address):
+            return 429, {'error': 'Trop de tentatives. Attendez une minute.'}, None
+        if not isinstance(password, str) or not 12 <= len(password) <= 1024:
+            return 400, {'error': 'Utilisez un mot de passe de 12 à 1024 caractères.'}, None
+        if password != confirmation:
+            return 400, {'error': 'Les mots de passe ne correspondent pas.'}, None
+        with self.lock:
+            if self.enabled and (not isinstance(current, str) or len(current) > 1024 or not hmac.compare_digest(self.hash(current), self.digest)):
+                return 400, {'error': 'Le mot de passe actuel est incorrect.'}, None
+            if self.storage is None:
+                return 503, {'error': 'Le stockage sécurisé du serveur est indisponible.'}, None
+            salt = secrets.token_bytes(16)
+            digest = self.hash(password, salt)
+            record = {'version': 1, 'algorithm': 'scrypt-16384-8-1', 'salt': salt.hex(), 'digest': digest.hex()}
+            temporary = None
+            try:
+                self.storage.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', prefix='.web-access-', dir=self.storage.parent, delete=False) as output:
+                    temporary = Path(output.name)
+                    json.dump(record, output)
+                    output.flush()
+                    os.fsync(output.fileno())
+                os.replace(temporary, self.storage)
+            except OSError:
+                return 503, {'error': 'Le mot de passe n’a pas pu être enregistré. Réessayez.'}, None
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
+            self.salt, self.digest = salt, digest
+            self.sessions.clear()
+            return 200, {'enabled': True, 'authenticated': True}, self.new_session()
 
     def logout(self, cookie):
         try:

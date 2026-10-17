@@ -24,7 +24,7 @@ class TranslationTests(unittest.TestCase):
                     if name.startswith('data-i18n'):self.keys.append(value)
         parser=Markup();parser.keys=[];parser.feed((ROOT/'web/index.html').read_text());parser.feed((ROOT/'web/login.html').read_text())
         for key in parser.keys:self.assertIn(key,keys)
-        js='\n'.join((ROOT/'web'/name).read_text() for name in ['app.js','display.js','settings.js','ai.js'])
+        js='\n'.join((ROOT/'web'/name).read_text() for name in ['app.js','display.js','settings.js','ai.js','server-settings.js'])
         for match in re.finditer(r"\bt\('([^']*)'\)",js):self.assertIn(match.group(1),keys)
 
     def test_standalone_compose_does_not_reference_old_bridge(self):
