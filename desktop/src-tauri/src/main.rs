@@ -4,7 +4,10 @@ use std::{
     fs,
     net::{IpAddr, TcpListener},
     process::{Child, Command, Stdio},
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
     time::{Duration, Instant},
 };
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
@@ -77,20 +80,35 @@ async fn probe(url: &Url) -> Result<(), String> {
     Ok(())
 }
 
-fn open_dashboard(app: &tauri::AppHandle, url: Url) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("dashboard") {
-        window
-            .close()
-            .map_err(|_| "Impossible de fermer l’ancien lecteur.")?;
+static VIEWER_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+fn viewer_label() -> String {
+    format!(
+        "dashboard-{}",
+        VIEWER_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+fn close_dashboards(app: &tauri::AppHandle) {
+    for (label, window) in app.webview_windows() {
+        if label.starts_with("dashboard-") {
+            let _ = window.close();
+        }
     }
+}
+
+fn open_dashboard(app: &tauri::AppHandle, url: Url) -> Result<(), String> {
+    close_dashboards(app);
     let allowed = url.origin();
-    WebviewWindowBuilder::new(app, "dashboard", WebviewUrl::External(url))
+    let viewer = WebviewWindowBuilder::new(app, viewer_label(), WebviewUrl::External(url))
         .title("Tuya Local — Caméras")
         .inner_size(1280., 850.)
         .min_inner_size(390., 600.)
         .on_navigation(move |target| target.origin() == allowed)
         .build()
         .map_err(|_| "Impossible d’ouvrir le lecteur.")?;
+    viewer
+        .set_focus()
+        .map_err(|_| "Impossible d’afficher le lecteur.")?;
     Ok(())
 }
 
@@ -231,9 +249,7 @@ fn stop_owned(state: &Server) {
 }
 #[tauri::command]
 async fn stop_local(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("dashboard") {
-        let _ = window.close();
-    }
+    close_dashboards(&app);
     tauri::async_runtime::spawn_blocking(move || stop_owned(&app.state::<Server>()))
         .await
         .map_err(|_| "Arrêt interrompu.")?;
@@ -274,12 +290,6 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if window.label() == "dashboard" && matches!(event, tauri::WindowEvent::Destroyed) {
-                if let Some(launcher) = window.app_handle().get_webview_window("launcher") {
-                    let _ = launcher.show();
-                    let _ = launcher.set_focus();
-                }
-            }
             if window.label() == "launcher" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
@@ -299,6 +309,13 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn switching_servers_allocates_distinct_window_labels() {
+        let first = viewer_label();
+        let second = viewer_label();
+        assert_ne!(first, second);
+        assert!(first.starts_with("dashboard-"));
+    }
     #[test]
     fn accepts_local_and_secure_remote_servers() {
         for address in [
