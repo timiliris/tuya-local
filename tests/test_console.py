@@ -66,7 +66,7 @@ class ConsoleTests(unittest.TestCase):
         import io
         players=Players()
         token=players.create('rtsp://127.0.0.1:8554/Jardin/hd','webrtc')
-        with patch('console.subprocess.Popen') as popen, patch('console.os.killpg') as kill:
+        with patch('console.subprocess.Popen') as popen, patch('console.os.killpg',create=True) as kill, patch('console.os.name','posix'):
             proc=Mock();proc.poll.return_value=None;proc.pid=1234
             proc.stdout=io.BytesIO(b'');popen.return_value=proc
             with self.assertRaisesRegex(ValueError,'WebRTC indisponible'):

@@ -1,7 +1,0 @@
-Agent DVR — add an RTSP camera (TCP):
-
-  rtsp://127.0.0.1:8554/CameraName/hd
-  rtsp://127.0.0.1:8554/OtherCamera/hd
-
-Use the names shown in the Tuya RTSP Bridge window.
-Do not add the same camera a second time via a Tuya cloud plugin.

@@ -1,5 +1,7 @@
 """Server-owned, bounded local video readers. No browser or cloud media input."""
 from __future__ import annotations
+from procutil import creationflags
+from runtime_config import rtsp_host
 import json
 import base64
 import selectors
@@ -13,7 +15,7 @@ def source_url(camera, mode):
     path = urlparse(camera.get('rtspSd', '')).path
     if not path.startswith('/') or any(c in path for c in '\r\n'):
         raise ValueError('Invalid local camera path')
-    return 'rtsp://127.0.0.1:8554' + quote(path, safe='/%') + '?ai=' + mode
+    return 'rtsp://'+rtsp_host() + quote(path, safe='/%') + '?ai=' + mode
 
 
 def effective_mode(camera, config):
@@ -80,7 +82,7 @@ class AIWorkers:
             proc=None
             self.status(device,phase='connecting')
             try:
-                proc=subprocess.Popen(command(url),stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
+                proc=subprocess.Popen(command(url),stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,creationflags=creationflags())
                 with selectors.DefaultSelector() as selector:
                     selector.register(proc.stdout,selectors.EVENT_READ)
                     buffer=b'';last=time.monotonic();received=False

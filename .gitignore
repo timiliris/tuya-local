@@ -1,24 +1,28 @@
+# Python and generated runtime files
 .venv/
 __pycache__/
 *.pyc
 *.log
 *.exe
-!installer/*.iss
-.tuya-data/
-web/live/
-hls/
-*.ts
 .DS_Store
-dist/
-build/
-installer/output/
 bin/
+build/
+dist/
+
+# Desktop dependencies, packaging and native build output
+node_modules/
+**/target/
+desktop/.build/
+desktop/.build-venv/
+desktop/src-tauri/runtime/
+desktop/src-tauri/gen/
+
+# Private deployments, account data and camera artifacts
+.tuya-data/
 data/
 config/
-packaging/windows/staging/
-packaging/windows/cache/
-
-# Local deployment, account sessions and network captures
+web/live/
+hls/
 .env
 .env.*
 !.env.example
@@ -30,7 +34,5 @@ packaging/windows/cache/
 *.key
 **/cloud_auth.json
 **/protect_session.json
-
-# Private local AI configuration and detection history (including snapshots)
 **/ai-config.json
 **/ai-events.sqlite*

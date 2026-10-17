@@ -25,7 +25,7 @@ jobs:
           go-version-file: vendor/tuya-ipc-terminal/go.mod
           cache-dependency-path: vendor/tuya-ipc-terminal/go.sum
       - name: Python dependencies
-        run: pip install -r requirements-docker.txt
+        run: pip install -r requirements.txt
       - name: Python checks
         run: |
           python -m py_compile src/*.py

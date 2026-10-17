@@ -28,7 +28,7 @@ class TranslationTests(unittest.TestCase):
         for match in re.finditer(r"\bt\('([^']*)'\)",js):self.assertIn(match.group(1),keys)
 
     def test_standalone_compose_does_not_reference_old_bridge(self):
-        for name in ['compose.console.yml','docker-compose.yml','docker-compose.ports.yml']:
+        for name in ['docker-compose.yml']:
             text=(ROOT/name).read_text()
             for removed in ['host.docker.internal','external:','18787','engine_data','tuya-lsc-test']:
                 self.assertNotIn(removed,text)

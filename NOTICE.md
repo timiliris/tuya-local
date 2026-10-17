@@ -42,73 +42,23 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-The Windows binary `bin/tuya-ipc-terminal.exe` (shipped in the installer, not
-in git) is a build of that tree plus the patches in UPSTREAM.md.
+## Python, desktop and media dependencies
 
-### Go libraries linked into that binary
+The shared server uses Requests (Apache-2.0), qrcode (BSD-3-Clause), Pillow
+(HPND), TinyTuya (MIT), NumPy (BSD-3-Clause) and OpenCV (Apache-2.0, with
+third-party notices). The desktop shell uses Tauri (MIT or Apache-2.0).
+Their original license texts accompany the packaged runtime where applicable.
 
-Declared in `vendor/tuya-ipc-terminal/go.mod`. All OSI-approved
-(MIT / BSD-style / Apache-2.0):
+Desktop builds freeze Python with PyInstaller and include an FFmpeg binary
+from imageio-ffmpeg. FFmpeg is a separate executable; its exact version,
+configuration, license statement and GPL/LGPL texts are retained in the
+runtime's `licenses/` directory. Source and build provenance:
+https://github.com/imageio/imageio-ffmpeg and https://ffmpeg.org/download.html.
+Docker obtains FFmpeg and its license files from the Debian distribution.
 
-| Module | Typical license |
-|---|---|
-| github.com/eclipse/paho.mqtt.golang | EDL / EPL |
-| github.com/pion/webrtc and pion/* | MIT |
-| github.com/rs/zerolog | MIT |
-| github.com/spf13/cobra | Apache-2.0 |
-| github.com/mdp/qrterminal | MIT |
-| golang.org/x/net, crypto, sys, term, sync | BSD-3 |
-
----
-
-## 2. Python dependencies
-
-On a source / Linux install they come from `pip install -r requirements.txt`.
-The Windows Setup.exe ships a private CPython plus those wheels.
-
-| Package | License |
-|---|---|
-| requests | Apache-2.0 |
-| qrcode | BSD-3-Clause |
-| pillow | HPND (historical PIL) |
-| tinytuya | MIT (jasonacox/tinytuya) |
-| python-vlc | LGPL-2.1+ (bindings) |
-
----
-
-## 3. Redistributed with the Windows Setup.exe (v1.2+)
-
-These are unmodified official binaries, copied next to the app. They are not
-statically linked into our Python. You may replace them.
-
-| Software | License of that binary | Notes |
-|---|---|---|
-| CPython 3.12 | PSF | `runtime/` — https://www.python.org |
-| VideoLAN VLC 3.0.21 (official win64 zip) | GPL-2.0 (player); libVLC is LGPL-2.1+ | `vlc/COPYING.txt`. Source: https://www.videolan.org |
-| ffmpeg 9.0.1 essentials (Gyan) | GPL-3.0 (`--enable-gpl --enable-version3`, includes libx264) | `bin/ffmpeg.exe` + `bin/FFMPEG-LICENSE.txt`. Source: https://ffmpeg.org and https://www.gyan.dev/ffmpeg/builds/ |
-
-Older project text called ffmpeg “LGPL”. That was wrong for this Gyan essentials
-build. The engine starts ffmpeg as a separate process. The optional preview
-loads `libvlc` dynamically.
-
-Linux packages these from the distro instead.
-
-Inno Setup is used only to *build* the Windows installer. It is not shipped
-as a library. The Inno license still allows any purpose, including commercial
-applications; a paid Inno key is requested for commercial users of the
-compiler, not strictly required. This project is given away (MIT, no paid
-edition). See https://jrsoftware.org/isorder.php
-
-Plain-language summary: [docs/legal.md](docs/legal.md) · [docs/rechtliches.md](docs/rechtliches.md)
-
----
-
-## 4. What is original to Tuya RTSP Bridge
-
-Desktop GUI, local HTTP API, QR login client, PTZ wrapper, watchdog,
-i18n, installer script, and documentation in this repository — unless a
-file says otherwise.
-
+The obsolete Tkinter GUI, bundled VLC and Inno Setup packaging have been
+removed. The original MIT license for retained upstream code remains intact.
+Historical documentation is linked from the project wiki's Archives page.
 
 ## OpenCV Zoo — NanoDet local object detection
 
@@ -118,6 +68,6 @@ commit `47534e27c9851bb1128ccc0102f1145e27f23f98`, under Apache License 2.0.
 The complete license is preserved in `vendor/nanodet/LICENSE`.
 
 The standard and quantized NanoDet ONNX weights from that same revision are
-downloaded during Docker image construction and verified by size and SHA-256
+downloaded during Docker image or desktop package construction and verified by size and SHA-256
 in `src/ai_models.py`. They are not stored in this Git repository.
 The source repository distributes this model under Apache-2.0.

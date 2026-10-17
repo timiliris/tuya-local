@@ -45,7 +45,8 @@ class Detector:
         import numpy as np
         from PIL import Image
         if model not in self.networks:
-            source = Path(__file__).resolve().parents[1] / 'vendor/nanodet/nanodet.py'
+            from paths import install_root
+            source = install_root() / 'vendor/nanodet/nanodet.py'
             spec = importlib.util.spec_from_file_location('tuya_nanodet', source)
             module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
             cv2.setNumThreads(2)

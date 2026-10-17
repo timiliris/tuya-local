@@ -1,0 +1,7 @@
+{
+  "$schema":"../gen/schemas/desktop-schema.json",
+  "identifier":"launcher-only",
+  "description":"Only the bundled launcher has native application access. Remote dashboards have no native capabilities.",
+  "windows":["launcher"],
+  "permissions":["core:default"]
+}

@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Optional
 
 from paths import bin_dir, engine_exe, engine_src, install_root
-from procutil import creationflags, kill_engine
+from procutil import creationflags, stop_process
+from runtime_config import rtsp_port
 
 ROOT = install_root()
 TOOLS = ROOT / "tools"
@@ -26,7 +27,7 @@ class RtspManager:
     def __init__(self, cwd: Path):
         self.cwd = cwd
         self.proc: Optional[subprocess.Popen] = None
-        self.port = 8554
+        self.port = rtsp_port()
         self.log: list[str] = []
         self._lock = threading.Lock()
 
@@ -39,14 +40,7 @@ class RtspManager:
     def running(self) -> bool:
         if self.proc is not None and self.proc.poll() is None:
             return True
-        s = socket.socket()
-        s.settimeout(0.4)
-        try:
-            return s.connect_ex(("127.0.0.1", self.port)) == 0
-        except Exception:
-            return False
-        finally:
-            s.close()
+        return False
 
     def status(self) -> dict:
         return {
@@ -87,10 +81,11 @@ class RtspManager:
         self._log("Binary ready.")
         return EXE
 
-    def start(self, port: int = 8554) -> None:
+    def start(self, port: int | None = None) -> None:
         if self.running():
             return
         exe = self.ensure_binary()
+        port = port or self.port
         self.port = port
         self._log(f"Starte RTSP auf Port {port} …")
         flags = creationflags()
@@ -115,15 +110,5 @@ class RtspManager:
 
     def stop(self) -> None:
         self._log("Stoppe RTSP …")
-        if self.proc and self.proc.poll() is None:
-            self.proc.terminate()
-            try:
-                self.proc.wait(timeout=8)
-            except subprocess.TimeoutExpired:
-                self.proc.kill()
+        stop_process(self.proc)
         self.proc = None
-        kill_engine()
-        for _ in range(10):
-            if not self.running():
-                break
-            time.sleep(0.3)

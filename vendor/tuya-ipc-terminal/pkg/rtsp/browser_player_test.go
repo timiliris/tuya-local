@@ -219,3 +219,23 @@ func TestBrowserTCPMuxAnswersSTUNOnMappedLANInterface(t *testing.T) {
 		t.Fatalf("invalid STUN response %v %v", decoded.Type, err)
 	}
 }
+
+func TestBrowserPlayerUsesConfiguredLoopbackPort(t *testing.T) {
+	t.Setenv("TUYA_RTSP_PORT", "18554")
+	request := BrowserPlayerRequest{URL: "rtsp://127.0.0.1:18554/Camera/hd", SDP: "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n"}
+	if err := validateBrowserRequest(request); err != nil {
+		t.Fatal(err)
+	}
+	request.URL = "rtsp://127.0.0.1:8554/Camera/hd"
+	if validateBrowserRequest(request) == nil {
+		t.Fatal("accepted the other runtime's RTSP port")
+	}
+}
+
+func TestBrowserAPIRejectsInvalidPortPool(t *testing.T) {
+	t.Setenv("TUYA_BROWSER_TCP_MIN", "65535")
+	_, _, err := browserAPI(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000})
+	if err == nil {
+		t.Fatal("accepted an overflowing TCP port range")
+	}
+}

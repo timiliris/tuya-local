@@ -1,4 +1,4 @@
-"""Install vs. user-data paths. Windows + Linux. No secrets."""
+"""Install vs. user-data paths. macOS, Windows and Linux. No secrets."""
 from __future__ import annotations
 
 import os
@@ -75,30 +75,6 @@ def engine_exe() -> Path:
     return bin_dir() / name
 
 
-def vlc_dir() -> Path | None:
-    """Folder that contains libvlc.dll / plugins. Bundled copy wins."""
-    env = os.environ.get("TUYA_VLC_DIR")
-    candidates = []
-    if env:
-        candidates.append(Path(env))
-    root = install_root()
-    candidates.extend(
-        [
-            root / "vlc",
-            root / "runtime" / "vlc",
-            Path(r"C:\Program Files\VideoLAN\VLC"),
-            Path(r"C:\Program Files (x86)\VideoLAN\VLC"),
-            Path("/usr/lib/vlc"),
-            Path("/usr/lib64/vlc"),
-            Path("/usr/lib/x86_64-linux-gnu/vlc"),
-        ]
-    )
-    for d in candidates:
-        if (d / "libvlc.dll").exists() or (d / "plugins").is_dir():
-            return d
-    return None
-
-
 def ffmpeg_exe() -> Path | None:
     """Bundled ffmpeg first, then PATH."""
     import shutil
@@ -115,17 +91,11 @@ def ffmpeg_exe() -> Path | None:
 
 
 def prepend_bundled_path() -> None:
-    """Make bundled ffmpeg/VLC visible to child processes."""
+    """Make bundled media tools visible to child processes."""
     parts: list[str] = []
     b = bin_dir()
     if b.is_dir():
         parts.append(str(b))
-    v = install_root() / "vlc"
-    if v.is_dir():
-        parts.append(str(v))
-        plug = v / "plugins"
-        if plug.is_dir():
-            os.environ.setdefault("VLC_PLUGIN_PATH", str(plug))
     if parts:
         os.environ["PATH"] = os.pathsep.join(parts) + os.pathsep + os.environ.get("PATH", "")
 

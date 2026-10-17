@@ -13,9 +13,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, quote
 
-RTSP_HOST = '127.0.0.1:8554'
+from procutil import creationflags, stop_process
+from runtime_config import rtsp_host, port
+from paths import install_root, engine_exe
+RTSP_HOST = rtsp_host()
 PLAYER_IDLE_TIMEOUT = 150
-WEB = Path(__file__).resolve().parents[1] / 'web'
+WEB = install_root() / 'web'
 ALLOWED_ACTIONS = {'/api/qr/start', '/api/cameras/refresh', '/api/ptz/move', '/api/rtsp/start', '/api/settings/read', '/api/settings/write', '/api/settings/start', '/api/settings/status', '/api/settings/cancel'}
 runtime = None
 
@@ -92,7 +95,7 @@ class Players:
             if not item or item['claimed'] or item['transport'] != 'mp4':
                 raise ValueError('Ce lecteur a expiré. Relance la vidéo.')
             item['claimed'] = True
-            proc = subprocess.Popen(ffmpeg_command(item['url']), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            proc = subprocess.Popen(ffmpeg_command(item['url']), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=creationflags())
             item['process'] = proc
             return proc
 
@@ -105,9 +108,10 @@ class Players:
                 raise ValueError('Ce lecteur a expiré. Relance la vidéo.')
             item['claimed'] = True
             proc = subprocess.Popen(
-                [os.environ.get('TUYA_BROWSER_ENGINE', '/app/bin/tuya-ipc-terminal'), 'browser-player'],
+                [os.environ.get('TUYA_BROWSER_ENGINE', str(engine_exe())), 'browser-player'],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                 start_new_session=True,
+                creationflags=creationflags(),
             )
             item['process'] = proc
         timer = threading.Timer(112, lambda: self.stop(token))
@@ -136,6 +140,9 @@ class Players:
             item = self.items.pop(token, None)
         proc = (item or {}).get('process')
         if proc and proc.poll() is None:
+            if os.name=='nt':
+                stop_process(proc)
+                return
             if item.get('transport') == 'webrtc':
                 try:
                     os.killpg(proc.pid, signal.SIGTERM)
@@ -320,7 +327,7 @@ class Handler(BaseHTTPRequestHandler):
             proc.stdout.close()
 
 
-def main():
+def main(stop_event=None):
     global runtime
     from console_runtime import Runtime
     runtime = Runtime()
@@ -336,9 +343,14 @@ def main():
             if _ai is not None:
                 _ai.cleanup()
     threading.Thread(target=reap, daemon=True).start()
-    server = ThreadingHTTPServer(('0.0.0.0', 8787), Handler)
+    server = ThreadingHTTPServer((os.environ.get('TUYA_HTTP_HOST','0.0.0.0'), port('TUYA_HTTP_PORT',8787)), Handler)
     def shutdown(*_):
         threading.Thread(target=server.shutdown, daemon=True).start()
+    if stop_event is not None:
+        def watch_stop():
+            stop_event.wait()
+            shutdown()
+        threading.Thread(target=watch_stop,daemon=True).start()
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
     try:

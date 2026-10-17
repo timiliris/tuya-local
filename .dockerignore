@@ -4,19 +4,13 @@
 **/__pycache__
 **/*.pyc
 **/*.log
-docs
-examples
-installer
-packaging
 tests
-*.md
-!vendor/tuya-ipc-terminal/README.md
+desktop
+wiki
+scripts
 data
 config
 bin
-docs/images
-.shot-appdata
-
 .env
 .env.*
 !.env.example
@@ -25,7 +19,7 @@ compose.test.yml
 .tuya-data
 *.pcap
 *.pcapng
-
-# Private local AI configuration and detection history (including snapshots)
 **/ai-config.json
 **/ai-events.sqlite*
+web/live
+hls

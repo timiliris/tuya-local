@@ -29,8 +29,16 @@ type BrowserPlayerRequest struct {
 }
 
 func validateBrowserRequest(request BrowserPlayerRequest) error {
+	expectedPort := os.Getenv("TUYA_RTSP_PORT")
+	if expectedPort == "" {
+		expectedPort = "8554"
+	}
+	parsedPort, portErr := strconv.Atoi(expectedPort)
+	if portErr != nil || parsedPort < 1 || parsedPort > 65535 {
+		return errors.New("invalid local RTSP port")
+	}
 	u, err := url.Parse(request.URL)
-	if err != nil || u.Scheme != "rtsp" || u.Host != "127.0.0.1:8554" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+	if err != nil || u.Scheme != "rtsp" || u.Host != net.JoinHostPort("127.0.0.1", expectedPort) || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return errors.New("only the local RTSP engine is allowed")
 	}
 	if len(request.SDP) > 60000 || !strings.Contains(request.SDP, "m=video ") {
@@ -130,7 +138,15 @@ func browserAPI(codec webrtc.RTPCodecCapability) (*webrtc.API, func(), error) {
 	// It still sends RTP immediately, without MP4 buffering or transcoding.
 	var listener net.Listener
 	var err error
-	for port := 52100; port <= 52119; port++ {
+	firstPort := 52100
+	if configured := os.Getenv("TUYA_BROWSER_TCP_MIN"); configured != "" {
+		value, err := strconv.Atoi(configured)
+		if err != nil || value < 1024 || value > 65516 {
+			return nil, nil, errors.New("invalid browser TCP port range")
+		}
+		firstPort = value
+	}
+	for port := firstPort; port <= firstPort+19; port++ {
 		listener, err = net.Listen("tcp", ":"+strconv.Itoa(port))
 		if err == nil {
 			break

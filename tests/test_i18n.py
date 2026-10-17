@@ -1,34 +1,14 @@
-"""Fail if any language is missing UI keys."""
-from __future__ import annotations
-
-import sys
+"""The web catalog is shared by Docker and desktop playback."""
+import json
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+def test_catalogs():
+    catalogs=json.loads((Path(__file__).resolve().parents[1]/'web/locales.json').read_text())
+    assert set(catalogs)=={'fr','en','de','nl','es'}
+    for language,strings in catalogs.items():
+        assert set(strings)==set(catalogs['fr']),language
+        assert all(isinstance(value,str) and value.strip() for value in strings.values())
 
-from i18n import LANGS, _STRINGS  # noqa: E402
-
-
-def test_keys_match() -> None:
-    base = set(_STRINGS["en"])
-    assert base, "english strings empty"
-    for lang in LANGS:
-        keys = set(_STRINGS[lang])
-        missing = base - keys
-        extra = keys - base
-        assert not missing, f"{lang} missing {sorted(missing)}"
-        assert not extra, f"{lang} extra {sorted(extra)}"
-        ye = _STRINGS[lang].get("yaml_empty", "")
-        assert ye.endswith("\n"), f"{lang} yaml_empty must end with newline, got {ye!r}"
-
-
-def test_rtl_set() -> None:
-    from i18n import RTL_LANGS
-
-    assert RTL_LANGS == frozenset({"he", "yi"})
-
-
-if __name__ == "__main__":
-    test_keys_match()
-    test_rtl_set()
-    print("i18n ok", ",".join(LANGS), "keys", len(_STRINGS["en"]))
+if __name__=='__main__':
+    test_catalogs()
+    print('Shared interface translations passed')

@@ -12,6 +12,7 @@ import time
 import uuid
 from pathlib import Path
 from PIL import Image
+from paths import install_root
 from ai_models import CLASSES, MODELS, Detector
 
 DEFAULT = {'enabled': False, 'model': 'nanodet-int8', 'classes': ['person','car','dog','cat'],
@@ -74,7 +75,7 @@ class LocalAI:
         self.directory=Path(directory);self.directory.mkdir(parents=True,exist_ok=True)
         self.config_file=self.directory/'ai-config.json';self.database=self.directory/'ai-events.sqlite'
         self.lock=threading.RLock();self.infer_gate=threading.Lock();self.configs={};self.revision={};self.last_frame={};self.tracks={};self.results={};self.workers=None
-        self.detector=detector or Detector(Path(__file__).resolve().parents[1]/'models')
+        self.detector=detector or Detector(install_root()/'models')
         self.clock=clock;self.monotonic=monotonic
         try:
             saved=json.loads(self.config_file.read_text())

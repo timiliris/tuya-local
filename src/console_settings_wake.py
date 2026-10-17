@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from runtime_config import rtsp_host, rtsp_port
 import queue
 import socket
 import threading
@@ -20,7 +21,7 @@ def check_cancel(cancel):
 
 class LocalReader:
     def __init__(self, camera_path, cancel, timeout):
-        self.url = 'rtsp://127.0.0.1:8554/' + quote(camera_path.lstrip('/'), safe='') + '/sd'
+        self.url = 'rtsp://'+rtsp_host()+'/' + quote(camera_path.lstrip('/'), safe='') + '/sd'
         self.cancel = cancel
         self.deadline = time.monotonic() + timeout
         self.closed = threading.Event()
@@ -75,7 +76,7 @@ class LocalReader:
     def run(self):
         try:
             # Fixed loopback destination. SDP/cloud URLs can never redirect media.
-            self.stream = socket.create_connection(('127.0.0.1', 8554), timeout=3)
+            self.stream = socket.create_connection(('127.0.0.1', rtsp_port()), timeout=3)
             self.stream.settimeout(.25)
             self.request('DESCRIBE', self.url, {'Accept': 'application/sdp'})
             response = self.request('SETUP', self.url + '/video', {'Transport': 'RTP/AVP/TCP;unicast;interleaved=0-1'})

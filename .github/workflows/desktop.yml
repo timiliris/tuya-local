@@ -1,0 +1,60 @@
+name: Desktop
+on:
+  push:
+    branches: [main, 'codex/**']
+    paths: ['desktop/**','scripts/**','src/**','web/**','vendor/**','requirements.txt','.github/workflows/desktop.yml']
+  pull_request:
+    paths: ['desktop/**','scripts/**','src/**','web/**','vendor/**','requirements.txt','.github/workflows/desktop.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: vendor/tuya-ipc-terminal/go.mod
+          cache-dependency-path: vendor/tuya-ipc-terminal/go.sum
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Linux desktop libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev
+      - name: Prepare embedded server
+        run: |
+          python -m pip install -r desktop/requirements-build.txt
+          python scripts/build_desktop_server.py
+          python scripts/test_desktop_server.py
+      - name: Desktop tests
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run check
+      - name: Build native packages
+        working-directory: desktop
+        run: npm run build
+      - name: Retain native packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: tuya-local-${{ matrix.os }}
+          path: |
+            desktop/src-tauri/target/release/bundle/**/*.dmg
+            desktop/src-tauri/target/release/bundle/**/*.msi
+            desktop/src-tauri/target/release/bundle/**/*.exe
+            desktop/src-tauri/target/release/bundle/**/*.deb
+            desktop/src-tauri/target/release/bundle/**/*.rpm
+            desktop/src-tauri/target/release/bundle/**/*.AppImage
+          if-no-files-found: error

@@ -1,0 +1,12 @@
+{
+  "name": "tuya-local-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "check": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "prepare:server": "python ../scripts/build_desktop_server.py"
+  },
+  "devDependencies": {"@tauri-apps/cli": "^2"}
+}

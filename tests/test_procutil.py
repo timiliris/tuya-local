@@ -1,20 +1,27 @@
-"""Process cleanup also works in minimal containers without pkill."""
-from __future__ import annotations
-
+"""Shutdown only terminates the process owned by this runtime."""
 import sys
+import subprocess
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock,patch
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src'))
+from procutil import stop_process
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-import procutil
+def test_owned_process_cleanup():
+    with patch('procutil.os.name','posix'):
+        verify_posix_cleanup()
+    process=Mock();process.pid=12345;process.poll.return_value=None
+    with patch('procutil.os.name','nt'),patch('procutil.creationflags',return_value=0),patch('procutil.subprocess.run') as run:
+        stop_process(process)
+        assert run.call_args.args[0]==['taskkill.exe','/PID','12345','/T','/F']
 
+def verify_posix_cleanup():
+    process=Mock();process.poll.return_value=None
+    stop_process(process);process.terminate.assert_called_once();process.kill.assert_not_called()
+    stopped=Mock();stopped.poll.return_value=0
+    stop_process(stopped);stopped.terminate.assert_not_called()
+    slow=Mock();slow.poll.return_value=None;slow.wait.side_effect=[subprocess.TimeoutExpired('owned',8),0]
+    stop_process(slow);slow.kill.assert_called_once()
 
-def test_cleanup_without_pkill() -> None:
-    with patch.object(procutil.subprocess, "run", side_effect=FileNotFoundError), patch.object(procutil, "pids_matching", return_value=[]) as matching:
-        procutil.kill_engine()
-        matching.assert_called_once_with("tuya-ipc-terminal")
-
-
-if __name__ == "__main__":
-    test_cleanup_without_pkill()
-    print("Minimal-container process cleanup passed")
+if __name__=='__main__':
+    test_owned_process_cleanup()
+    print('Owned-process cleanup passed')

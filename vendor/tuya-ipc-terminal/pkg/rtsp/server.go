@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"sync"
 	"time"
 
@@ -102,7 +103,7 @@ func (s *RTSPServer) Start() error {
 		return errors.New("server is already running")
 	}
 
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", s.port))
+	listener, err := net.Listen("tcp", net.JoinHostPort(os.Getenv("TUYA_RTSP_BIND"), fmt.Sprint(s.port)))
 	if err != nil {
 		return fmt.Errorf("failed to listen on port %d: %v", s.port, err)
 	}

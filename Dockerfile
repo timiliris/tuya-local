@@ -16,11 +16,13 @@ RUN apt-get update \
     && useradd --create-home --uid 1000 --shell /usr/sbin/nologin bridge
 
 WORKDIR /app
-COPY requirements-docker.txt /app/requirements-docker.txt
-RUN pip install --no-cache-dir -r /app/requirements-docker.txt
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY src /app/src
-COPY web /app/web
+COPY web/index.html web/app.js web/settings.js web/ai.js web/webrtc.js web/display.js web/recovery.js web/app.css web/i18n.js web/locales.json /app/web/
+COPY LICENSE NOTICE.md /app/licenses/
+COPY vendor/tuya-ipc-terminal/LICENSE /app/licenses/tuya-ipc-terminal-MIT.txt
 COPY vendor/nanodet /app/vendor/nanodet
 RUN python /app/src/ai_models.py /app/models
 COPY --from=engine /out/tuya-ipc-terminal /app/bin/tuya-ipc-terminal
