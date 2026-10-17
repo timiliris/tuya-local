@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import sys
+import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tuya_client import (  # noqa: E402
     as_dict_list,
+    merge_camera_skill,
     extra_homes,
     home_gid,
     looks_like_camera,
@@ -60,6 +62,16 @@ def test_safe_poll_text() -> None:
     assert safe_poll_text("QR erzeugt, warte auf Scan …") == "QR erzeugt, warte auf Scan …"
 
 
+def test_partial_camera_skill_keeps_known_formats() -> None:
+    cached = {"videos": [{"streamType": 2, "codecType": 4, "width": 2560, "height": 1440}], "audios": [{"codecType": 106}]}
+    result = json.loads(merge_camera_skill('{"webrtc":115,"lowPower":1}', json.dumps(cached)))
+    assert result["videos"] == cached["videos"]
+    assert result["audios"] == cached["audios"]
+    assert result["lowPower"] == 1
+    assert json.loads(merge_camera_skill('{"videos":[{"codecType":2}]}', json.dumps(cached)))["videos"] == [{"codecType":2}]
+    assert json.loads(merge_camera_skill("bad", json.dumps(cached)))["videos"] == cached["videos"]
+
+
 if __name__ == "__main__":
     test_looks_like_camera()
     test_as_dict_list_wrap()
@@ -67,4 +79,5 @@ if __name__ == "__main__":
     test_room_devices()
     test_extra_homes()
     test_safe_poll_text()
+    test_partial_camera_skill_keeps_known_formats()
     print("discover helpers ok")

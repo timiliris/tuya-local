@@ -1,6 +1,7 @@
 package rtsp
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -21,8 +22,10 @@ const (
 )
 
 type RTPForwarder struct {
-	clients map[string]*RTPClient
-	mutex   sync.RWMutex
+	playReady chan struct{}
+	playOnce  sync.Once
+	clients   map[string]*RTPClient
+	mutex     sync.RWMutex
 
 	// RTP session info
 	videoSSRC uint32
@@ -36,6 +39,7 @@ type RTPForwarder struct {
 }
 
 type RTPClient struct {
+	playing       bool
 	sessionID     string
 	transportMode TransportMode
 
@@ -70,6 +74,7 @@ type RTPClient struct {
 func NewRTPForwarder() *RTPForwarder {
 	return &RTPForwarder{
 		clients:          make(map[string]*RTPClient),
+		playReady:        make(chan struct{}),
 		videoSSRC:        0, // Default SSRC for video
 		audioSSRC:        1, // Default SSRC for audio
 		firstVideoPacket: true,
@@ -234,6 +239,24 @@ func (rf *RTPForwarder) AddTCPClient(sessionID string, conn net.Conn, videoRTPCh
 	return nil
 }
 
+func (rf *RTPForwarder) StartClient(sessionID string) {
+	rf.mutex.Lock()
+	defer rf.mutex.Unlock()
+	if client := rf.clients[sessionID]; client != nil {
+		client.playing = true
+		rf.playOnce.Do(func() { close(rf.playReady) })
+	}
+}
+
+func (rf *RTPForwarder) WaitForPlay(ctx context.Context) error {
+	select {
+	case <-rf.playReady:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (rf *RTPForwarder) RemoveClient(sessionID string) {
 	rf.mutex.Lock()
 	defer rf.mutex.Unlock()
@@ -267,8 +290,10 @@ func (rf *RTPForwarder) ForwardVideoPacket(packet *rtp.Packet) {
 		return
 	}
 
-	// Serialize packet
-	data, err := packet.Marshal()
+	// The RTSP SDP advertises video on payload type 96.
+	outgoing := packet.Clone()
+	outgoing.PayloadType = 96
+	data, err := outgoing.Marshal()
 	if err != nil {
 		core.Logger.Error().Err(err).Msg("Error marshaling video RTP packet")
 		return
@@ -276,6 +301,9 @@ func (rf *RTPForwarder) ForwardVideoPacket(packet *rtp.Packet) {
 
 	// Forward to all clients
 	for sessionID, client := range rf.clients {
+		if !client.playing {
+			continue
+		}
 		client.lastActivity = time.Now()
 
 		if client.transportMode == TransportUDP {
@@ -319,6 +347,9 @@ func (rf *RTPForwarder) ForwardAudioPacket(packet *rtp.Packet) {
 
 	// Forward to all clients
 	for sessionID, client := range rf.clients {
+		if !client.playing {
+			continue
+		}
 		client.lastActivity = time.Now()
 
 		if client.transportMode == TransportUDP {

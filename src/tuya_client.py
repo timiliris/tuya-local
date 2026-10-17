@@ -11,6 +11,23 @@ from typing import Any, Optional
 
 import requests
 
+def merge_camera_skill(current: str, previous: str) -> str:
+    """Keep known media capabilities when a sleeping camera omits them."""
+    def parse(value: str) -> dict:
+        try:
+            result = json.loads(value or "{}")
+            return result if isinstance(result, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+
+    merged = parse(current)
+    cached = parse(previous)
+    for key in ("videos", "audios"):
+        if not merged.get(key) and cached.get(key):
+            merged[key] = cached[key]
+    return json.dumps(merged, ensure_ascii=False)
+
+
 REGIONS = {
     "eu": {
         "key": "eu-central",
@@ -589,6 +606,7 @@ class TuyaClient:
         email = self.login.get("email") or self.login.get("username") or self.login.get("uid")
         user_key = _user_key(self.region_key, email)
         cameras = []
+        previous_skills = {cam["deviceId"]: cam.get("skill", "") for cam in self.cameras}
         for device in devices:
             did = device["deviceId"]
             skill = ""
@@ -604,6 +622,7 @@ class TuyaClient:
                 skill = (cfg.get("result") or {}).get("skill") or ""
             except Exception as exc:
                 errors.append(f"jarvis {did[-6:]}: {type(exc).__name__}")
+            skill = merge_camera_skill(skill, previous_skills.get(did, ""))
             name = _clean_name(device.get("deviceName") or "", did)
             cameras.append(
                 {

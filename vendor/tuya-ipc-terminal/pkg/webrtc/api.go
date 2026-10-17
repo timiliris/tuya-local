@@ -3,7 +3,9 @@
 package webrtc
 
 import (
+	"fmt"
 	"net"
+	"os"
 
 	"tuya-ipc-terminal/pkg/utils"
 	"tuya-ipc-terminal/pkg/xnet"
@@ -46,6 +48,15 @@ func NewServerAPI(network, address string, filters *Filters) (*webrtc.API, error
 	}
 
 	s := webrtc.SettingEngine{}
+	if hostIP := os.Getenv("TUYA_WEBRTC_HOST_IP"); hostIP != "" {
+		if ip := net.ParseIP(hostIP); ip == nil || ip.To4() == nil {
+			return nil, fmt.Errorf("TUYA_WEBRTC_HOST_IP must be an IPv4 address")
+		}
+		s.SetNAT1To1IPs([]string{hostIP}, webrtc.ICECandidateTypeHost)
+		if err := s.SetEphemeralUDPPortRange(52000, 52019); err != nil {
+			return nil, err
+		}
+	}
 
 	// fix https://github.com/pion/webrtc/pull/2407
 	s.SetDTLSInsecureSkipHelloVerify(true)
@@ -95,6 +106,9 @@ func NewServerAPI(network, address string, filters *Filters) (*webrtc.API, error
 			webrtc.NetworkTypeUDP4, webrtc.NetworkTypeUDP6,
 			webrtc.NetworkTypeTCP4, webrtc.NetworkTypeTCP6,
 		}
+	}
+	if os.Getenv("TUYA_WEBRTC_HOST_IP") != "" {
+		networkTypes = []webrtc.NetworkType{webrtc.NetworkTypeUDP4}
 	}
 	s.SetNetworkTypes(networkTypes)
 

@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
@@ -29,22 +31,29 @@ import (
 type WebRTCBridge struct {
 	camera         *storage.CameraInfo
 	resolution     string
+	offerSDP       string
 	streamType     int
 	isHEVC         bool
 	user           *storage.UserSession
 	storageManager *storage.StorageManager
 
 	// WebRTC components
-	peerConnection *pion.PeerConnection
-	dataChannel    *pion.DataChannel
-	mqttClient     *tuya.MQTTClient
-	cameraClient   *tuya.MQTTCameraClient
-	rtpForwarder   *RTPForwarder
+	peerConnection   *pion.PeerConnection
+	dataChannel      *pion.DataChannel
+	mqttClient       *tuya.MQTTClient
+	mobileWakeClient *tuya.MQTTClient
+	cameraClient     *tuya.MQTTCameraClient
+	rtpForwarder     *RTPForwarder
 
 	// State
-	connected bool
-	waiter    utils.Waiter
-	mutex     sync.RWMutex
+	wakeReady       chan struct{}
+	wakeOnce        sync.Once
+	wakeError       error
+	activeAttempt   *WebRTCBridge
+	connected       bool
+	connectionReady chan error
+	connectionOnce  sync.Once
+	mutex           sync.RWMutex
 
 	// Context for cancellation
 	ctx    context.Context
@@ -65,15 +74,16 @@ func NewWebRTCBridge(camera *storage.CameraInfo, streamResolution string, user *
 	ctx, cancel := context.WithCancel(context.Background())
 
 	wb := &WebRTCBridge{
-		camera:         camera,
-		resolution:     streamResolution,
-		user:           user,
-		rtpForwarder:   NewRTPForwarder(),
-		storageManager: storageManager,
-		connected:      false,
-		waiter:         utils.Waiter{},
-		ctx:            ctx,
-		cancel:         cancel,
+		camera:          camera,
+		resolution:      streamResolution,
+		user:            user,
+		rtpForwarder:    NewRTPForwarder(),
+		storageManager:  storageManager,
+		connected:       false,
+		wakeReady:       make(chan struct{}),
+		connectionReady: make(chan error, 1),
+		ctx:             ctx,
+		cancel:          cancel,
 	}
 
 	wb.rtpForwarder.OnBackchannelAudio = wb.ForwardBackchannelAudioPacket
@@ -81,13 +91,157 @@ func NewWebRTCBridge(camera *storage.CameraInfo, streamResolution string, user *
 	return wb
 }
 
-func (wb *WebRTCBridge) Start() error {
+func (wb *WebRTCBridge) signalConnection(err error) {
+	wb.connectionOnce.Do(func() { wb.connectionReady <- err })
+}
+
+func (wb *WebRTCBridge) waitForConnection(timeout time.Duration) error {
+	return wb.waitForConnectionRetry(timeout, 0, nil)
+}
+
+func (wb *WebRTCBridge) waitForConnectionRetry(timeout, interval time.Duration, retry func(int)) error {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	var ticks <-chan time.Time
+	if interval > 0 && retry != nil {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		ticks = ticker.C
+	}
+	attempt := 0
+	for {
+		select {
+		case err := <-wb.connectionReady:
+			return err
+		case <-wb.ctx.Done():
+			return wb.ctx.Err()
+		case <-timer.C:
+			return errors.New("camera did not deliver video before startup deadline")
+		case <-ticks:
+			attempt++
+			retry(attempt)
+		}
+	}
+}
+
+func (wb *WebRTCBridge) finishWake(err error) {
+	wb.wakeOnce.Do(func() { wb.wakeError = err; close(wb.wakeReady) })
+}
+
+func (wb *WebRTCBridge) waitForWake(ctx context.Context) error {
+	select {
+	case <-wb.wakeReady:
+		return wb.wakeError
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-wb.ctx.Done():
+		return wb.ctx.Err()
+	}
+}
+
+func (wb *WebRTCBridge) Start() (startError error) {
+	defer func() { wb.finishWake(startError) }()
+	ctx, cancel := context.WithTimeout(wb.ctx, 90*time.Second)
+	defer cancel()
+	return retryCameraStart(ctx, 3, 2*time.Second, func(attempt int) error {
+		if attempt > 1 {
+			core.Logger.Info().Int("attempt", attempt).Msg("Retrying camera wake and local video connection")
+		}
+		child := NewWebRTCBridge(wb.camera, wb.resolution, wb.user, wb.storageManager)
+		child.cancel()
+		child.ctx, child.cancel = context.WithCancel(wb.ctx)
+		stopDeadline := context.AfterFunc(ctx, child.cancel)
+		child.rtpForwarder = wb.rtpForwarder
+		child.OnVideoPacket, child.OnAudioPacket = wb.OnVideoPacket, wb.OnAudioPacket
+		child.OnError = func(err error) {
+			child.signalConnection(err)
+			if child.ctx.Err() == nil {
+				wb.connectionFailed(err)
+			}
+		}
+		wb.mutex.Lock()
+		wb.activeAttempt = child
+		wb.mutex.Unlock()
+		if err := child.startAttempt(); err != nil {
+			stopDeadline()
+			child.stop(false)
+			return err
+		}
+		stopDeadline()
+		wb.mutex.Lock()
+		defer wb.mutex.Unlock()
+		if err := ctx.Err(); err != nil {
+			child.stop(false)
+			return err
+		}
+		// A successful session must outlive the bounded startup context.
+		wb.connected = true
+		return nil
+	})
+}
+
+func (wb *WebRTCBridge) connectionFailed(err error) {
+	wb.mutex.Lock()
+	wasConnected := wb.connected
+	wb.connected = false
+	wb.mutex.Unlock()
+	if wasConnected && wb.ctx.Err() == nil && wb.OnError != nil {
+		wb.OnError(err)
+	}
+}
+
+func retryCameraStart(ctx context.Context, attempts int, delay time.Duration, start func(int) error) error {
+	var lastError error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if lastError = start(attempt); lastError == nil {
+			return nil
+		}
+		if attempt == attempts {
+			break
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return fmt.Errorf("camera unavailable after %d attempts: %w", attempts, lastError)
+}
+
+func startupCameraSkill(live, cached string) (tuya.Skill, error) {
+	var skill, known tuya.Skill
+	if err := json.Unmarshal([]byte(live), &skill); err != nil {
+		return skill, fmt.Errorf("failed to parse skill info: %w", err)
+	}
+	if err := json.Unmarshal([]byte(cached), &known); err != nil {
+		if len(skill.Videos) == 0 {
+			return skill, fmt.Errorf("failed to read cached camera capabilities: %w", err)
+		}
+		return skill, nil
+	}
+	// LowPower is a device capability; an omitted live field must not disable wake-up.
+	if skill.LowPower == 0 {
+		skill.LowPower = known.LowPower
+	}
+	if len(skill.Videos) == 0 {
+		skill.Videos = known.Videos
+	}
+	if len(skill.Audios) == 0 {
+		skill.Audios = known.Audios
+	}
+	return skill, nil
+}
+
+func (wb *WebRTCBridge) startAttempt() error {
+	var startupWakeClient *tuya.MQTTClient
+	var startupLocalKey string
 	wb.mutex.Lock()
 	defer wb.mutex.Unlock()
-
-	if wb.connected {
-		return errors.New("bridge already connected")
-	}
 
 	core.Logger.Info().Msgf("Starting WebRTC bridge for camera: %s", wb.camera.DeviceName)
 
@@ -114,6 +268,7 @@ func (wb *WebRTCBridge) Start() error {
 		appInfo.Result.ClientId,
 		wb.user.SessionData.LoginResult.Domain.MobileMqttsUrl,
 		&mqttConfig.Result,
+		"https://"+wb.user.SessionData.ServerHost,
 	)
 
 	if err != nil {
@@ -124,16 +279,92 @@ func (wb *WebRTCBridge) Start() error {
 		return fmt.Errorf("MQTT connection failed: %v", err)
 	}
 
+	if os.Getenv("TUYA_MOBILE_WEBRTC") == "1" {
+		ctx, cancel := context.WithTimeout(wb.ctx, 8*time.Second)
+		mobile, mobileErr := tuya.NewMobileWakeClient(ctx, wb.user.SessionData.LoginResult)
+		if mobileErr == nil {
+			mobileErr = mobile.EnableMobileWebRTC(ctx)
+		}
+		cancel()
+		if mobileErr != nil {
+			if mobile != nil {
+				mobile.Stop()
+			}
+			return mobileErr
+		}
+		wb.mqttClient.Stop()
+		wb.mqttClient, wb.mobileWakeClient = mobile, mobile
+		core.Logger.Info().Msg("Using mobile WebRTC control with local video routing")
+	}
+
 	// Get WebRTC configuration
-	webRTCConfig, err := tuya.GetWebRTCConfig(httpClient, wb.user.SessionData.ServerHost, wb.camera.DeviceID)
+	var webRTCConfig *tuya.WebRTCConfigResponse
+	if os.Getenv("TUYA_MOBILE_WEBRTC") == "1" {
+		helper := os.Getenv("TUYA_NATIVE_WAKE_HELPER")
+		ctx, cancel := context.WithTimeout(wb.ctx, 15*time.Second)
+		output, commandErr := exec.CommandContext(ctx, "python3", helper, "--device", wb.camera.DeviceID, "--webrtc-config").Output()
+		cancel()
+		if commandErr != nil {
+			return errors.New("mobile WebRTC configuration unavailable")
+		}
+		webRTCConfig = &tuya.WebRTCConfigResponse{}
+		err = json.Unmarshal(output, &webRTCConfig.Result)
+	} else {
+		webRTCConfig, err = tuya.GetWebRTCConfig(httpClient, wb.user.SessionData.ServerHost, wb.camera.DeviceID)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to get WebRTC config: %v", err)
 	}
 
-	// Parse skill information
-	var skill tuya.Skill
-	if err := json.Unmarshal([]byte(webRTCConfig.Result.Skill), &skill); err != nil {
-		return fmt.Errorf("failed to parse skill info: %v", err)
+	skill, err := startupCameraSkill(webRTCConfig.Result.Skill, wb.camera.Skill)
+	if err != nil {
+		return err
+	}
+
+	if skill.LowPower != 0 {
+		wakeContext, cancelWake := context.WithTimeout(wb.ctx, 45*time.Second)
+		core.Logger.Info().Msg("Requesting low-power camera wake-up")
+		nativeAnswered := false
+		if helper := os.Getenv("TUYA_NATIVE_WAKE_HELPER"); helper != "" && os.Getenv("TUYA_MOBILE_WEBRTC") != "1" {
+			args := []string{helper, "--device", wb.camera.DeviceID}
+			if os.Getenv("TUYA_MOBILE_WEBRTC") == "1" {
+				args = append(args, "--prepare-only")
+			}
+			command := exec.CommandContext(wakeContext, "python3", args...)
+			if err := command.Run(); err != nil {
+				core.Logger.Warn().Msg("Native wake did not answer; trying standard wake")
+			} else {
+				nativeAnswered = os.Getenv("TUYA_MOBILE_WEBRTC") != "1"
+				core.Logger.Info().Msg("Native mobile wake answered; starting local video connection")
+			}
+		}
+		if !nativeAnswered {
+			wakeClient := wb.mqttClient
+			if wb.mobileWakeClient == nil {
+				wb.mobileWakeClient, err = tuya.NewMobileWakeClient(wakeContext, wb.user.SessionData.LoginResult)
+			}
+			if err == nil {
+				wakeClient = wb.mobileWakeClient
+				core.Logger.Info().Msg("Using mobile channel for camera wake-up")
+			} else {
+				core.Logger.Warn().Err(err).Msg("Mobile wake unavailable; using web wake channel")
+			}
+			startupWakeClient, startupLocalKey = wakeClient, webRTCConfig.Result.LocalKey
+			wakeErr := wakeClient.RequestWakeUp(wakeContext, wb.camera.DeviceID, webRTCConfig.Result.LocalKey)
+			if wakeErr != nil {
+				core.Logger.Warn().Err(wakeErr).Msg("Camera wake-up request failed; trying direct connection")
+			} else {
+				core.Logger.Info().Msg("Camera wake command sent; requesting video immediately")
+			}
+		}
+		cancelWake()
+		if os.Getenv("TUYA_MOBILE_WEBRTC") != "1" {
+			refreshed, refreshErr := tuya.GetWebRTCConfig(httpClient, wb.user.SessionData.ServerHost, wb.camera.DeviceID)
+			if refreshErr != nil {
+				return fmt.Errorf("failed to refresh connection after wake-up: %w", refreshErr)
+			}
+			webRTCConfig = refreshed
+		}
 	}
 
 	// Determine stream settings
@@ -147,6 +378,18 @@ func (wb *WebRTCBridge) Start() error {
 		return fmt.Errorf("failed to setup peer connection: %v", err)
 	}
 
+	if os.Getenv("TUYA_MOBILE_SIGNALING") == "1" && wb.mobileWakeClient != nil {
+		signalContext, cancelSignal := context.WithTimeout(wb.ctx, 8*time.Second)
+		err := wb.mobileWakeClient.EnableMobileSignaling(signalContext, wb.camera.DeviceID, webRTCConfig.Result.LocalKey)
+		cancelSignal()
+		if err != nil {
+			return err
+		}
+		wb.mqttClient.Stop()
+		wb.mqttClient = wb.mobileWakeClient
+		core.Logger.Info().Msg("Using direct mobile MQTT signaling with local video routing")
+	}
+
 	// Setup MQTT camera client
 	wb.setupMQTTCameraClient(&webRTCConfig.Result)
 
@@ -155,7 +398,30 @@ func (wb *WebRTCBridge) Start() error {
 		return fmt.Errorf("failed to create offer: %v", err)
 	}
 
-	if err = wb.waiter.Wait(); err != nil {
+	connectionTimeout := 15 * time.Second
+	if skill.LowPower != 0 {
+		connectionTimeout = 35 * time.Second
+	}
+	if err = wb.waitForConnectionRetry(connectionTimeout, 4*time.Second, func(attempt int) {
+		if startupWakeClient != nil {
+			ctx, cancel := context.WithTimeout(wb.ctx, 3*time.Second)
+			err := startupWakeClient.RequestWakeUp(ctx, wb.camera.DeviceID, startupLocalKey)
+			cancel()
+			if err == nil {
+				core.Logger.Info().Int("pulse", attempt).Msg("Camera startup wake pulse sent")
+			}
+		}
+		if wb.peerConnection.RemoteDescription() == nil {
+			if err := wb.cameraClient.ResendOffer(wb.offerSDP, wb.resolution, wb.offerStreamType(), wb.usesDataChannel(), attempt); err != nil {
+				core.Logger.Warn().Msg("Camera startup offer retry failed")
+			} else {
+				core.Logger.Info().Int("retry", attempt).Msg("Camera startup offer retransmitted")
+			}
+		} else if wb.resolution == "hd" && !wb.usesDataChannel() && wb.peerConnection.ConnectionState() == pion.PeerConnectionStateConnected {
+			_ = wb.cameraClient.SendResolution(0)
+			core.Logger.Info().Msg("Camera startup HD command repeated")
+		}
+	}); err != nil {
 		return fmt.Errorf("failed to establish connection: %v", err)
 	}
 
@@ -165,15 +431,17 @@ func (wb *WebRTCBridge) Start() error {
 	return nil
 }
 
-func (wb *WebRTCBridge) Stop() {
+func (wb *WebRTCBridge) Stop() { wb.stop(true) }
+
+func (wb *WebRTCBridge) stop(stopForwarder bool) {
+	wb.cancel()
 	wb.mutex.Lock()
 	defer wb.mutex.Unlock()
 
-	if !wb.connected {
-		return
-	}
-
 	wb.connected = false
+	if wb.activeAttempt != nil {
+		wb.activeAttempt.stop(false)
+	}
 
 	core.Logger.Info().Msgf("Stopping WebRTC bridge for camera: %s", wb.camera.DeviceName)
 
@@ -190,13 +458,17 @@ func (wb *WebRTCBridge) Stop() {
 		wb.peerConnection.Close()
 	}
 
+	if wb.mobileWakeClient != nil && wb.mobileWakeClient != wb.mqttClient {
+		wb.mobileWakeClient.Stop()
+	}
+
 	// Stop MQTT client
 	if wb.mqttClient != nil {
 		wb.mqttClient.Stop()
 	}
 
 	// Stop RTP forwarder
-	if wb.rtpForwarder != nil {
+	if stopForwarder && wb.rtpForwarder != nil {
 		wb.rtpForwarder.Stop()
 	}
 
@@ -210,6 +482,13 @@ func (wb *WebRTCBridge) IsConnected() bool {
 }
 
 func (wb *WebRTCBridge) ForwardBackchannelAudioPacket(packet *rtp.Packet) {
+	wb.mutex.RLock()
+	child := wb.activeAttempt
+	wb.mutex.RUnlock()
+	if child != nil {
+		child.ForwardBackchannelAudioPacket(packet)
+		return
+	}
 	if wb.backchannel != nil {
 		_ = wb.backchannel.WriteRTP(packet)
 	}
@@ -228,6 +507,9 @@ func (wb *WebRTCBridge) setupPeerConnection(webRTCConfig *tuya.WebRTCConfig) err
 	}
 
 	// Create peer connection configuration
+	if localMediaOnly() {
+		iceServers = nil
+	}
 	conf := pion.Configuration{
 		ICEServers:         iceServers,
 		ICETransportPolicy: pion.ICETransportPolicyAll,
@@ -246,57 +528,18 @@ func (wb *WebRTCBridge) setupPeerConnection(webRTCConfig *tuya.WebRTCConfig) err
 		return fmt.Errorf("failed to create peer connection: %v", err)
 	}
 
-	// On HEVC, use DataChannel to receive video/audio
-	if wb.isHEVC {
+	if wb.usesDataChannel() {
+		wb.peerConnection.OnDataChannel(func(channel *pion.DataChannel) {
+			core.Logger.Info().Str("label", channel.Label()).Msg("Remote HEVC data channel")
+			wb.configureDataChannel(channel)
+		})
 		maxRetransmits := uint16(5)
 		ordered := true
-
-		wb.dataChannel, err = wb.peerConnection.CreateDataChannel("fmp4Stream", &pion.DataChannelInit{
-			MaxRetransmits: &maxRetransmits,
-			Ordered:        &ordered,
-		})
-
-		wb.dataChannel.OnMessage(func(msg pion.DataChannelMessage) {
-			if msg.IsString {
-				if connected, err := wb.probe(msg); err != nil {
-					wb.handleError(err)
-				} else if connected {
-					wb.waiter.Done(nil)
-				}
-			} else {
-				packet := &rtp.Packet{}
-				if err := packet.Unmarshal(msg.Data); err != nil {
-					// skip
-					return
-				}
-
-				switch packet.SSRC {
-				case wb.rtpForwarder.videoSSRC:
-					wb.rtpForwarder.ForwardVideoPacket(packet)
-				case wb.rtpForwarder.audioSSRC:
-					wb.rtpForwarder.ForwardAudioPacket(packet)
-				}
-			}
-		})
-
-		wb.dataChannel.OnError(func(err error) {
-			wb.handleError(err)
-		})
-
-		wb.dataChannel.OnClose(func() {
-			wb.handleError(errors.New("datachannel: closed"))
-		})
-
-		wb.dataChannel.OnOpen(func() {
-			codecRequest, _ := json.Marshal(tuya.DataChannelMessage{
-				Type: "codec",
-				Msg:  "",
-			})
-
-			if err := wb.sendMessageToDataChannel(codecRequest); err != nil {
-				wb.handleError(fmt.Errorf("failed to send codec request: %w", err))
-			}
-		})
+		channel, err := wb.peerConnection.CreateDataChannel("fmp4Stream", &pion.DataChannelInit{MaxRetransmits: &maxRetransmits, Ordered: &ordered})
+		if err != nil {
+			return err
+		}
+		wb.configureDataChannel(channel)
 	}
 
 	// Setup connection state handler
@@ -308,9 +551,10 @@ func (wb *WebRTCBridge) setupPeerConnection(webRTCConfig *tuya.WebRTCConfig) err
 		if state == pion.PeerConnectionStateConnected {
 			core.Logger.Info().Msgf("WebRTC connection established")
 
-			if !wb.isHEVC && wb.resolution == "hd" {
-				_ = wb.cameraClient.SendResolution(0)
-				wb.waiter.Done(nil)
+			if !wb.usesDataChannel() {
+				if wb.resolution == "hd" {
+					_ = wb.cameraClient.SendResolution(0)
+				}
 			}
 		}
 	})
@@ -323,7 +567,7 @@ func (wb *WebRTCBridge) setupPeerConnection(webRTCConfig *tuya.WebRTCConfig) err
 		if track.Kind() == pion.RTPCodecTypeVideo {
 			wb.videoTrack = track
 
-			if !wb.isHEVC {
+			if !wb.usesDataChannel() {
 				go wb.handleVideoTrack(track)
 			}
 		} else if track.Kind() == pion.RTPCodecTypeAudio {
@@ -344,7 +588,7 @@ func (wb *WebRTCBridge) setupPeerConnection(webRTCConfig *tuya.WebRTCConfig) err
 				}
 			}
 
-			if !wb.isHEVC {
+			if !wb.usesDataChannel() {
 				go wb.handleAudioTrack(track)
 			}
 		}
@@ -368,6 +612,9 @@ func (wb *WebRTCBridge) setupMQTTCameraClient(webRTCConfig *tuya.WebRTCConfig) {
 
 	// Setup handlers
 	wb.cameraClient.HandleAnswer = func(answer tuya.AnswerFrame) {
+		if localMediaOnly() {
+			answer.Sdp = localSDP(answer.Sdp)
+		}
 		core.Logger.Trace().Msgf("Received WebRTC answer")
 		core.Logger.Trace().Msgf("Answer SDP: %s", answer.Sdp)
 
@@ -389,6 +636,9 @@ func (wb *WebRTCBridge) setupMQTTCameraClient(webRTCConfig *tuya.WebRTCConfig) {
 
 	wb.cameraClient.HandleCandidate = func(candidate tuya.CandidateFrame) {
 		candidateStr := strings.TrimSpace(candidate.Candidate)
+		if localMediaOnly() && !localCandidate(candidateStr) {
+			return
+		}
 		core.Logger.Trace().Msgf("Received ICE candidate: %s", candidateStr)
 
 		if candidateStr != "" {
@@ -425,6 +675,9 @@ func (wb *WebRTCBridge) setupMQTTCameraClient(webRTCConfig *tuya.WebRTCConfig) {
 func (wb *WebRTCBridge) createAndSendOffer() error {
 	wb.peerConnection.OnICECandidate(func(candidate *pion.ICECandidate) {
 		if candidate != nil {
+			if localMediaOnly() && !localCandidate("a="+candidate.ToJSON().Candidate) {
+				return
+			}
 			core.Logger.Trace().Msgf("Generated ICE candidate: %s", candidate.ToJSON().Candidate)
 
 			if err := wb.cameraClient.SendCandidate("a=" + candidate.ToJSON().Candidate); err != nil {
@@ -447,12 +700,17 @@ func (wb *WebRTCBridge) createAndSendOffer() error {
 	// Remove extmap lines to reduce payload size (device limitation)
 	re := regexp.MustCompile(`\r\na=extmap[^\r\n]*`)
 	offer = re.ReplaceAllString(offer, "")
+	if localMediaOnly() {
+		offer = localSDP(offer)
+	}
 
 	core.Logger.Trace().Msgf("Sending WebRTC offer")
 
 	// Send offer
-	if err := wb.cameraClient.SendOffer(offer, wb.resolution, wb.streamType, wb.isHEVC); err != nil {
-		return fmt.Errorf("failed to send offer: %v", err)
+	wb.offerSDP = offer
+	err = wb.cameraClient.SendOffer(offer, wb.resolution, wb.offerStreamType(), wb.usesDataChannel())
+	if err != nil {
+		return fmt.Errorf("failed to send offer: %w", err)
 	}
 
 	return nil
@@ -460,6 +718,9 @@ func (wb *WebRTCBridge) createAndSendOffer() error {
 
 func (wb *WebRTCBridge) handleVideoTrack(track *pion.TrackRemote) {
 	core.Logger.Trace().Msgf("Starting video track handler")
+	var normalizer legacyHEVCPacketizer
+	normalize := wb.isHEVC && !wb.usesDataChannel() && track.Codec().MimeType == pion.MimeTypeH264
+	firstPacket := true
 
 	for {
 		select {
@@ -482,6 +743,19 @@ func (wb *WebRTCBridge) handleVideoTrack(track *pion.TrackRemote) {
 				continue
 			}
 
+			if normalize {
+				packet = normalizer.convert(packet)
+				if packet == nil || (firstPacket && !normalizer.parameters) {
+					continue
+				}
+			}
+			if firstPacket {
+				wb.signalConnection(nil)
+				if err := wb.rtpForwarder.WaitForPlay(wb.ctx); err != nil {
+					return
+				}
+				firstPacket = false
+			}
 			wb.rtpForwarder.ForwardVideoPacket(packet)
 		}
 	}
@@ -554,6 +828,7 @@ func (wb *WebRTCBridge) probe(msg pion.DataChannelMessage) (bool, error) {
 		return false, err
 	}
 
+	core.Logger.Info().Str("stage", message.Type).Msg("HEVC control message")
 	switch message.Type {
 	case "codec":
 		frameRequest, _ := json.Marshal(tuya.DataChannelMessage{
@@ -567,6 +842,7 @@ func (wb *WebRTCBridge) probe(msg pion.DataChannelMessage) (bool, error) {
 		}
 
 	case "recv":
+		core.Logger.Info().Str("metadata", message.Msg).Msg("HEVC routing metadata")
 		var recvMessage tuya.RecvMessage
 		if err := json.Unmarshal([]byte(message.Msg), &recvMessage); err != nil {
 			return false, err
@@ -600,8 +876,85 @@ func (wb *WebRTCBridge) sendMessageToDataChannel(message []byte) error {
 }
 
 func (wb *WebRTCBridge) handleError(err error) {
+	wb.signalConnection(err)
 	if wb.OnError != nil {
-		wb.waiter.Done(err)
 		wb.OnError(err)
 	}
+}
+
+func (wb *WebRTCBridge) usesDataChannel() bool {
+	return wb.isHEVC && os.Getenv("TUYA_HEVC_TRANSPORT") != "rtp"
+}
+
+func (wb *WebRTCBridge) configureDataChannel(channel *pion.DataChannel) {
+	wb.dataChannel = channel
+	receivedFirstMessage := false
+	receivedFirstPacket := false
+	channel.OnMessage(func(msg pion.DataChannelMessage) {
+		if !receivedFirstMessage {
+			receivedFirstMessage = true
+			core.Logger.Info().Bool("text", msg.IsString).Int("bytes", len(msg.Data)).Msg("First HEVC data message")
+		}
+		if msg.IsString || json.Valid(msg.Data) {
+			if connected, err := wb.probe(msg); err != nil {
+				wb.handleError(err)
+			} else if connected {
+				wb.signalConnection(nil)
+			}
+		} else {
+			packet := &rtp.Packet{}
+			if err := packet.Unmarshal(msg.Data); err != nil {
+				if !receivedFirstPacket {
+					core.Logger.Warn().Err(err).Int("bytes", len(msg.Data)).Msg("HEVC packet parse failed")
+				}
+				receivedFirstPacket = true
+				return
+			}
+			if !receivedFirstPacket {
+				receivedFirstPacket = true
+				core.Logger.Info().Uint32("ssrc", packet.SSRC).Uint8("payload_type", packet.PayloadType).Uint32("expected_video", wb.rtpForwarder.videoSSRC).Uint32("expected_audio", wb.rtpForwarder.audioSSRC).Msg("First HEVC RTP packet")
+			}
+
+			switch packet.SSRC {
+			case wb.rtpForwarder.videoSSRC:
+				wb.rtpForwarder.ForwardVideoPacket(packet)
+			case wb.rtpForwarder.audioSSRC:
+				wb.rtpForwarder.ForwardAudioPacket(packet)
+			}
+		}
+	})
+
+	channel.OnError(func(err error) {
+		wb.handleError(err)
+	})
+
+	channel.OnClose(func() {
+		wb.handleError(errors.New("datachannel: closed"))
+	})
+
+	channel.OnOpen(func() {
+		core.Logger.Info().Msg("HEVC data channel opened")
+		codecRequest, _ := json.Marshal(tuya.DataChannelMessage{
+			Type: "codec",
+			Msg:  "",
+		})
+
+		if err := wb.sendMessageToDataChannel(codecRequest); err != nil {
+			wb.handleError(fmt.Errorf("failed to send codec request: %w", err))
+		}
+		if os.Getenv("TUYA_HEVC_EAGER_START") == "1" {
+			frameRequest, _ := json.Marshal(tuya.DataChannelMessage{Type: "start", Msg: "frame"})
+			if err := wb.sendMessageToDataChannel(frameRequest); err != nil {
+				wb.handleError(err)
+			}
+		}
+
+	})
+}
+
+func (wb *WebRTCBridge) offerStreamType() int {
+	if wb.isHEVC && !wb.usesDataChannel() {
+		return 1
+	}
+	return wb.streamType
 }

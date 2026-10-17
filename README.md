@@ -1,3 +1,33 @@
+# Tuya Local
+
+A standalone Docker fork of [DanEng1982/tuya-rtsp-bridge](https://github.com/DanEng1982/tuya-rtsp-bridge), with the corrected camera engine and a new browser interface in one image.
+
+- Local camera video with RTSP output and browser WebRTC playback. H.265 HD falls back to local H.264 conversion when the browser cannot decode it.
+- On-demand wake-up with bounded retries, startup diagnostics, frozen-video detection and automatic reconnection.
+- French, English, Dutch, German and Spanish interface; light, dark and system themes.
+- Sentinel display: selected cameras, fullscreen grid or timed rotation, saved settings and screen wake lock when supported.
+- QR account login, snapshots and PTZ where supported by the camera.
+
+Tuya is still required for account login, wake-up and signaling. PTZ can use Tuya's cloud. Video relay candidates are rejected; camera compatibility and long-sleep wake-up depend on the model and firmware. Continuous sentinel viewing uses battery power on solar/battery cameras.
+
+## Run Tuya Local
+
+```sh
+git clone https://github.com/timiliris/tuya-local.git
+cd tuya-local
+cp .env.example .env
+# Edit TUYA_HOST_IP in .env: the LAN IPv4 address of the computer running Docker.
+docker compose up -d --build
+```
+
+Open [the local interface](http://127.0.0.1:18788/) and scan its QR code using Tuya / Smart Life. The camera VLAN must communicate with the Docker host. The host ports 52000–52019/UDP (camera media) and 52100–52119/TCP (browser WebRTC) are bound to the configured LAN address. The web interface and RTSP output are bound to localhost by default. There is no application login for the web interface; keep the localhost binding unless access is restricted on your trusted network.
+
+Account sessions and device keys stay in the `tuya_data` and `tuya_config` Docker volumes. `.env`, local playlists, captures and runtime data are ignored by Git and the Docker build context. The source contains public Tuya application-profile constants inherited from upstream or documented protocol work; these are distinct from private account sessions and camera keys. `.gitleaks.toml` allows only those exact public constants, without excluding source files from scanning.
+
+The original MIT licenses and attribution remain in [LICENSE](LICENSE), [NOTICE.md](NOTICE.md) and [CREDITS.md](CREDITS.md). The inherited desktop / Home Assistant documentation below describes the original project, not the standalone Tuya Local Docker interface.
+
+---
+
 # Tuya RTSP Bridge
 
 <p align="center">

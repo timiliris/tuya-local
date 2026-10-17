@@ -17,3 +17,16 @@ data/
 config/
 packaging/windows/staging/
 packaging/windows/cache/
+
+# Local deployment, account sessions and network captures
+.env
+.env.*
+!.env.example
+/compose.test.yml
+/*.m3u
+*.pcap
+*.pcapng
+*.pem
+*.key
+**/cloud_auth.json
+**/protect_session.json

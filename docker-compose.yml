@@ -1,22 +1,36 @@
-# Linux / HA OS / homelab — host network so camera LAN-UDP and PTZ reach the box.
-# Windows / Docker Desktop: use docker-compose.ports.yml instead.
-#
-#   docker compose up -d --build
-#   open http://<this-host>:8787  → Create QR → confirm in Smart Life
-#   then  rtsp://<this-host>:8554/<CameraName>/hd
-
 services:
-  tuya-rtsp-bridge:
+  tuya-local:
     build: .
-    image: tuya-rtsp-bridge:local
-    container_name: tuya-rtsp-bridge
+    image: tuya-local:dev
+    container_name: tuya-local
+    init: true
     restart: unless-stopped
-    network_mode: host
+    stop_grace_period: 20s
+    ports:
+      - "${TUYA_BIND_ADDRESS:-127.0.0.1}:${TUYA_HTTP_PORT:-18788}:8787"
+      - "${TUYA_BIND_ADDRESS:-127.0.0.1}:8554:8554"
+      - "${TUYA_HOST_IP:?Set TUYA_HOST_IP in .env using .env.example}:52000-52019:52000-52019/udp"
+      - "${TUYA_HOST_IP:?Set TUYA_HOST_IP in .env using .env.example}:52100-52119:52100-52119/tcp"
     environment:
-      TUYA_BRIDGE_ROOT: /app
-      XDG_DATA_HOME: /data
-      XDG_CONFIG_HOME: /config
-      PYTHONUNBUFFERED: "1"
+      TUYA_BRIDGE_PUBLIC_HOST: ${TUYA_PUBLIC_HOST:-127.0.0.1}
+      TUYA_WEBRTC_HOST_IP: ${TUYA_HOST_IP:?Set TUYA_HOST_IP in .env using .env.example}
+      TUYA_LOCAL_MEDIA_ONLY: "1"
+      TUYA_HEVC_TRANSPORT: rtp
+      TUYA_HEVC_EAGER_START: "1"
+      TUYA_MOBILE_SIGNALING: "0"
+      TUYA_MOBILE_WEBRTC: "0"
+      TUYA_NATIVE_WAKE_HELPER: ""
     volumes:
-      - ./data:/data
-      - ./config:/config
+      - tuya_data:/data
+      - tuya_config:/config
+    tmpfs:
+      - /tmp:size=128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+volumes:
+  tuya_data:
+  tuya_config:

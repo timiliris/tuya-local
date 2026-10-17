@@ -7,7 +7,7 @@ COPY vendor/tuya-ipc-terminal/go.mod vendor/tuya-ipc-terminal/go.sum ./
 RUN go mod download
 COPY vendor/tuya-ipc-terminal/ ./
 ENV CGO_ENABLED=0
-RUN go build -trimpath -ldflags="-s -w" -o /out/tuya-ipc-terminal .
+RUN go test ./pkg/rtsp ./pkg/webrtc ./pkg/tuya && go build -trimpath -ldflags="-s -w" -o /out/tuya-ipc-terminal .
 
 FROM python:3.12-slim-bookworm
 RUN apt-get update \
@@ -29,6 +29,9 @@ RUN chmod 755 /app/bin/tuya-ipc-terminal \
 ENV TUYA_BRIDGE_ROOT=/app \
     PYTHONPATH=/app/src \
     PYTHONUNBUFFERED=1 \
+    TUYA_LOCAL_MEDIA_ONLY=1 \
+    TUYA_HEVC_TRANSPORT=rtp \
+    TUYA_HEVC_EAGER_START=1 \
     XDG_DATA_HOME=/data \
     XDG_CONFIG_HOME=/config \
     PATH="/app/bin:${PATH}"
@@ -39,4 +42,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/api/state', timeout=3)"
 
 WORKDIR /data/tuya-rtsp-bridge
-CMD ["python", "-u", "/app/src/server.py"]
+CMD ["python", "-u", "/app/src/console.py"]

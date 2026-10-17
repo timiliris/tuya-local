@@ -50,15 +50,16 @@ type RTSPClient struct {
 }
 
 type CameraStream struct {
-	camera       *storage.CameraInfo
-	resolution   string
-	user         *storage.UserSession
-	webrtcBridge *WebRTCBridge
-	clients      map[string]*RTSPClient
-	mutex        sync.RWMutex
-	connecting   bool
-	active       bool
-	lastActivity time.Time
+	camera         *storage.CameraInfo
+	resolution     string
+	user           *storage.UserSession
+	webrtcBridge   *WebRTCBridge
+	clients        map[string]*RTSPClient
+	mutex          sync.RWMutex
+	startRequested bool
+	connecting     bool
+	active         bool
+	lastActivity   time.Time
 
 	// Delayed shutdown
 	shutdownTimer *time.Timer
@@ -334,18 +335,8 @@ func (s *RTSPServer) getOrCreateStream(camera *storage.CameraInfo, streamResolut
 	stream.connecting = true
 
 	stream.webrtcBridge.OnError = func(err error) {
-		if stream.active || stream.connecting {
-			core.Logger.Error().Err(err).Msgf("WebRTC error for camera %s", camera.DeviceName)
-
-			// Only stop if no clients are connected
-			stream.mutex.Lock()
-			clientCount := len(stream.clients)
-			stream.mutex.Unlock()
-
-			if clientCount == 0 {
-				stream.stopStreamInternal()
-			}
-		}
+		core.Logger.Error().Err(err).Msgf("WebRTC error for camera %s", camera.DeviceName)
+		go stream.stopStream()
 	}
 
 	s.streams[streamId] = stream
@@ -476,7 +467,8 @@ func (cs *CameraStream) AddClient(client *RTSPClient) {
 	cs.lastActivity = time.Now()
 
 	// Start stream if not active
-	if !cs.active {
+	if !cs.active && !cs.startRequested {
+		cs.startRequested = true
 		go cs.startStream()
 	}
 }
@@ -536,10 +528,21 @@ func (cs *CameraStream) startStream() {
 		return
 	}
 
+	cs.finishStart()
+}
+
+func (cs *CameraStream) finishStart() {
 	cs.mutex.Lock()
+	defer cs.mutex.Unlock()
+	if !cs.webrtcBridge.IsConnected() {
+		cs.stopStreamInternal()
+		return
+	}
 	cs.connecting = false
 	cs.active = true
-	cs.mutex.Unlock()
+	if len(cs.clients) == 0 {
+		cs.scheduleShutdown()
+	}
 }
 
 func (cs *CameraStream) stopStream() {
@@ -557,6 +560,7 @@ func (cs *CameraStream) stopStreamInternal() {
 	wasActive := cs.active
 	cs.active = false
 	cs.connecting = false
+	cs.startRequested = false
 
 	// Cancel any pending shutdown
 	if cs.shutdownTimer != nil {

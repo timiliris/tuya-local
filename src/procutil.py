@@ -91,5 +91,8 @@ def kill_engine() -> None:
             creationflags=creationflags(),
         )
         return
-    subprocess.run(["pkill", "-f", "tuya-ipc-terminal"], capture_output=True)
+    try:
+        subprocess.run(["pkill", "-f", "tuya-ipc-terminal"], capture_output=True)
+    except FileNotFoundError:
+        pass
     kill_pids(pids_matching("tuya-ipc-terminal"))

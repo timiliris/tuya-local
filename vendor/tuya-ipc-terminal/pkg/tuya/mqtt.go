@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 	"tuya-ipc-terminal/pkg/core"
 	"tuya-ipc-terminal/pkg/utils"
@@ -12,6 +13,10 @@ import (
 )
 
 type MQTTClient struct {
+	mobileWake     bool
+	signalKey      []byte
+	signalSource   [4]byte
+	signalSequence uint32
 	mqtt           mqtt.Client
 	uid            string
 	subscribeTopic string
@@ -28,6 +33,7 @@ type MqttFrameHeader struct {
 	SessionID     string `json:"sessionid"`
 	MotoID        string `json:"moto_id"`
 	TransactionID string `json:"tid"`
+	Path          string `json:"path,omitempty"`
 	Seq           int    `json:"seq"`
 	Rtx           int    `json:"rtx"`
 }
@@ -44,7 +50,7 @@ type MqttMessage struct {
 	Data     MqttFrame `json:"data"`
 }
 
-func NewMqttClient(clientId, mobileMqttsUrl string, mqttConfig *MQTConfig) (*MQTTClient, error) {
+func NewMqttClient(clientId, mobileMqttsUrl string, mqttConfig *MQTConfig, origins ...string) (*MQTTClient, error) {
 	client := &MQTTClient{
 		uid:            mqttConfig.Msid,
 		subscribeTopic: fmt.Sprintf("/av/u/%s", mqttConfig.Msid),
@@ -57,6 +63,9 @@ func NewMqttClient(clientId, mobileMqttsUrl string, mqttConfig *MQTConfig) (*MQT
 
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(wssUrl)
+	if len(origins) > 0 && origins[0] != "" {
+		opts.SetHTTPHeaders(http.Header{"Origin": []string{origins[0]}})
+	}
 	opts.SetClientID(username)
 	opts.SetUsername(username)
 	opts.SetPassword(password)
@@ -121,10 +130,23 @@ func (c *MQTTClient) onDisconnect(client mqtt.Client, err error) {
 }
 
 func (c *MQTTClient) consume(client mqtt.Client, msg mqtt.Message) {
+	payload := msg.Payload()
+	if len(c.signalKey) > 0 {
+		var err error
+		payload, err = decodeMobileFrame(c.signalKey, payload)
+		if err != nil {
+			core.Logger.Debug().Err(err).Int("bytes", len(msg.Payload())).Msg("Ignored invalid mobile control frame")
+			return
+		}
+	}
 	var rmqtt MqttMessage
-	if err := json.Unmarshal(msg.Payload(), &rmqtt); err != nil {
+	if err := json.Unmarshal(payload, &rmqtt); err != nil {
 		core.Logger.Error().Err(err).Msg("Failed to unmarshal mqtt message: %s")
 		return
+	}
+
+	if len(c.signalKey) > 0 {
+		core.Logger.Info().Int("protocol", rmqtt.Protocol).Str("type", rmqtt.Data.Header.Type).Msg("Mobile control frame received")
 	}
 
 	sessionId := rmqtt.Data.Header.SessionID
@@ -140,6 +162,21 @@ func (c *MQTTClient) consume(client mqtt.Client, msg mqtt.Message) {
 	case "candidate":
 		cameraClient.onMqttCandidate(&rmqtt)
 	case "disconnect":
+		var details map[string]interface{}
+		_ = json.Unmarshal(rmqtt.Data.Message, &details)
+		event := core.Logger.Warn()
+		for _, key := range []string{"reason", "close_reason", "code", "error", "msg"} {
+			switch value := details[key].(type) {
+			case string:
+				if len(value) > 160 {
+					value = value[:160]
+				}
+				event = event.Str(key, value)
+			case float64:
+				event = event.Float64(key, value)
+			}
+		}
+		event.Msg("Camera disconnect details")
 		cameraClient.onMqttDisconnect()
 	}
 }

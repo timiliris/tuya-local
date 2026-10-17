@@ -38,3 +38,7 @@ git -C vendor\tuya-ipc-terminal fetch upstream
 ```
 
 Then merge/rebase and restore the three files if they conflict.
+
+## Additional Tuya Local changes
+
+The standalone fork adds bounded low-power wake/offer/HD retries, cached capability preservation, legacy HEVC RTP normalization, first-video readiness and failed-session cleanup. It rejects public/TURN camera media routes. `browser-player` forwards local RTSP RTP to a browser peer over local ICE-TCP without transcoding; unsupported browser codecs use the Python console's local FFmpeg fallback. Public mobile-signaling experiments remain disabled by default. Tests cover wake lifecycle, local media policy, codec normalization and browser negotiation.

@@ -1,0 +1,24 @@
+# These exact public Tuya application-profile constants are protocol identifiers,
+# not account credentials or camera local keys. No file or directory is excluded.
+# Existing upstream profile: src/cloud_mobile.py (DanEng1982/tuya-rtsp-bridge).
+# Experimental mobile profile: abovecolin/tuya-mobile, tuya_mobile/profiles.py.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Exact public Tuya application-profile constants; never user credentials"
+regexTarget = "secret"
+regexes = [
+  '^3fjrekuxank9eaej3gcx$',
+  '^aq7xvqcyqcnegvew793pqjmhv77rneqc$',
+  '^vay9g59g9g99qf3rtqptmc3emhkanwkx$',
+  '^f3hd7pet4p83kemjdf5wqsa5tavrv579$',
+  '^5gdtanjtf38vyxkqh87cjwfcqjhvjjqa$',
+]
+
+[[allowlists]]
+description = "Synthetic AES test vector in the native-wake unit test only"
+condition = "AND"
+paths = ['^tests/test_native_wakeup\.py$']
+regexTarget = "secret"
+regexes = ['^0123456789abcdef$']

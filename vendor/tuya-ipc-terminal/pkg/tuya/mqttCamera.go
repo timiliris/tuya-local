@@ -65,28 +65,30 @@ type DisconnectFrame struct {
 }
 
 func NewMqttCameraClient(mqttClient *MQTTClient, device *Device, webrtcConfig *WebRTCConfig) *MQTTCameraClient {
+
+	sessionID := utils.RandString(32, 16)
+
 	return &MQTTCameraClient{
 		mqttClient:   mqttClient,
 		webrtcConfig: webrtcConfig,
 		auth:         webrtcConfig.Auth,
 		motoId:       webrtcConfig.MotoId,
 		deviceId:     device.DeviceId,
-		SessionId:    utils.RandString(32, 16),
+		SessionId:    sessionID,
 		publishTopic: fmt.Sprintf("/av/moto/%s/u/%s", webrtcConfig.MotoId, device.DeviceId),
 	}
 }
 
 func (c *MQTTCameraClient) SendOffer(sdp string, streamResolution string, streamType int, isHEVC bool) error {
+	return c.ResendOffer(sdp, streamResolution, streamType, isHEVC, 0)
+}
+
+func (c *MQTTCameraClient) ResendOffer(sdp string, streamResolution string, streamType int, isHEVC bool, retry int) error {
 	if isHEVC {
-		// On HEVC we use streamType 0 for main stream (hd) and 1 for sub stream (sd)
-		if streamResolution == "hd" {
-			streamType = 0
-		} else {
-			streamType = 1
-		}
+		streamType = mqttStreamType(streamType)
 	}
 
-	return c.sendMqttMessage("offer", 302, "", OfferFrame{
+	return c.sendMqttFrame("offer", 302, "", retry, OfferFrame{
 		Mode:              "webrtc",
 		Sdp:               sdp,
 		StreamType:        streamType,
@@ -184,6 +186,10 @@ func (c *MQTTCameraClient) onError(err error) {
 }
 
 func (c *MQTTCameraClient) sendMqttMessage(messageType string, protocol int, transactionID string, data interface{}) error {
+	return c.sendMqttFrame(messageType, protocol, transactionID, 0, data)
+}
+
+func (c *MQTTCameraClient) sendMqttFrame(messageType string, protocol int, transactionID string, retry int, data interface{}) error {
 	if c.mqttClient.closed {
 		return errors.New("mqtt client is closed, send mqtt message fail")
 	}
@@ -206,10 +212,16 @@ func (c *MQTTCameraClient) sendMqttMessage(messageType string, protocol int, tra
 				MotoID:        c.motoId,
 				TransactionID: transactionID,
 				Seq:           0,
-				Rtx:           0,
+				Rtx:           retry,
 			},
 			Message: jsonMessage,
 		},
+	}
+
+	if len(c.mqttClient.signalKey) > 0 {
+		msg.T = time.Now().Unix()
+		msg.Data.Header.MotoID = ""
+		msg.Data.Header.Path = "mqtt"
 	}
 
 	payload, err := json.Marshal(msg)
@@ -217,11 +229,33 @@ func (c *MQTTCameraClient) sendMqttMessage(messageType string, protocol int, tra
 		return err
 	}
 
-	token := c.mqttClient.mqtt.Publish(c.publishTopic, 1, false, payload)
-	if token.Wait() && token.Error() != nil {
+	payload, err = c.mqttClient.cameraPayload(payload)
+	if err != nil {
+		return err
+	}
+	topic := c.publishTopic
+	if len(c.mqttClient.signalKey) > 0 {
+		topic = "smart/mb/out/" + c.deviceId
+	}
+	token := c.mqttClient.mqtt.Publish(topic, 1, false, payload)
+	if !token.WaitTimeout(5 * time.Second) {
+		return errors.New("camera control publish timed out")
+	}
+	if token.Error() != nil {
 		core.Logger.Error().Err(token.Error()).Msgf("Send mqtt message error")
 		return token.Error()
 	}
 
 	return nil
+}
+
+func mqttStreamType(streamType int) int {
+	switch streamType {
+	case 2:
+		return 0
+	case 4:
+		return 1
+	default:
+		return streamType
+	}
 }

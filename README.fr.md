@@ -1,3 +1,33 @@
+# Tuya Local
+
+Fork Docker autonome de [DanEng1982/tuya-rtsp-bridge](https://github.com/DanEng1982/tuya-rtsp-bridge), avec le moteur corrigé et la nouvelle interface dans une seule image.
+
+- Vidéo locale, sortie RTSP et lecteur WebRTC. Conversion locale de secours en H.264 si le navigateur ne décode pas la HD H.265.
+- Réveil à la demande avec tentatives limitées, diagnostics, détection des vidéos figées et reconnexion automatique.
+- Interface en français, anglais, néerlandais, allemand et espagnol ; thèmes clair, sombre et automatique.
+- Mode sentinelle : caméras au choix, mosaïque ou rotation, plein écran, réglages mémorisés et maintien de l’écran éveillé si le navigateur le permet.
+- Connexion par QR code, captures d’image et PTZ selon le modèle.
+
+Le compte, le réveil et la négociation dépendent encore de Tuya. Le PTZ peut utiliser le cloud. Les relais vidéo sont refusés ; la compatibilité et le réveil après une longue veille dépendent du modèle et du firmware. La surveillance continue consomme la batterie des caméras solaires.
+
+## Installer Tuya Local
+
+```sh
+git clone https://github.com/timiliris/tuya-local.git
+cd tuya-local
+cp .env.example .env
+# Modifier TUYA_HOST_IP dans .env : adresse IPv4 locale de l’ordinateur Docker.
+docker compose up -d --build
+```
+
+Ouvrir [l’interface locale](http://127.0.0.1:18788/) et scanner son QR code avec Tuya / Smart Life. Le VLAN des caméras doit communiquer avec l’hôte Docker. Les ports 52000–52019/UDP servent au flux des caméras et 52100–52119/TCP à WebRTC dans le navigateur. L’interface et RTSP restent accessibles uniquement depuis l’hôte par défaut. L’interface web ne possède pas de connexion utilisateur propre : conserver cette restriction ou limiter l’accès au réseau de confiance.
+
+Les sessions et clés des caméras restent dans les volumes Docker `tuya_data` et `tuya_config`. Le fichier `.env`, les listes de caméras, les captures et les données d’exécution sont exclus de Git et du contexte de compilation Docker. Les constantes publiques des profils d’application Tuya restent dans le code ; elles ne correspondent pas aux sessions privées ou aux clés des caméras. Le scanner n’autorise que ces constantes exactes, sans exclure de fichiers source.
+
+Les licences et les auteurs d’origine sont conservés. La documentation historique ci-dessous concerne le projet d’origine et ses anciens modes d’installation.
+
+---
+
 # Pont RTSP Tuya
 
 <p align="center">

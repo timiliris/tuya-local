@@ -260,9 +260,10 @@ type VideoSkill struct {
 }
 
 type Skill struct {
-	WebRTC int          `json:"webrtc"`
-	Audios []AudioSkill `json:"audios"`
-	Videos []VideoSkill `json:"videos"`
+	LowPower int          `json:"lowPower"`
+	WebRTC   int          `json:"webrtc"`
+	Audios   []AudioSkill `json:"audios"`
+	Videos   []VideoSkill `json:"videos"`
 }
 
 type AudioAttributes struct {

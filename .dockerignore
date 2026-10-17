@@ -16,3 +16,12 @@ config
 bin
 docs/images
 .shot-appdata
+
+.env
+.env.*
+!.env.example
+*.m3u
+compose.test.yml
+.tuya-data
+*.pcap
+*.pcapng

@@ -51,6 +51,9 @@ if client.login:
 
 
 def lan_ip() -> str:
+    public_host = os.environ.get("TUYA_BRIDGE_PUBLIC_HOST")
+    if public_host:
+        return public_host
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("8.8.8.8", 80))

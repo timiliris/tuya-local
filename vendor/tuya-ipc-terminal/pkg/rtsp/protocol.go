@@ -2,6 +2,7 @@ package rtsp
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -482,6 +483,16 @@ func (s *RTSPServer) handlePlay(client *RTSPClient, request *RTSPRequest) {
 		return
 	}
 
+	if client.stream != nil && client.stream.webrtcBridge != nil {
+		ctx, cancel := context.WithTimeout(client.stream.webrtcBridge.ctx, 100*time.Second)
+		err := client.stream.webrtcBridge.waitForWake(ctx)
+		cancel()
+		if err != nil {
+			sendRTSPResponse(client.conn, 503, "Service Unavailable", map[string]string{"CSeq": strconv.Itoa(request.CSeq)}, "")
+			return
+		}
+	}
+
 	headers := map[string]string{
 		"CSeq":     strconv.Itoa(request.CSeq),
 		"Session":  client.session,
@@ -490,6 +501,9 @@ func (s *RTSPServer) handlePlay(client *RTSPClient, request *RTSPRequest) {
 	}
 
 	sendRTSPResponse(client.conn, 200, "OK", headers, "")
+	if client.stream != nil && client.stream.webrtcBridge != nil {
+		client.stream.webrtcBridge.rtpForwarder.StartClient(client.session)
+	}
 
 	core.Logger.Info().Msgf("Starting RTSP stream for client %s", client.session)
 }
