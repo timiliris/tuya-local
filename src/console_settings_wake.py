@@ -52,6 +52,10 @@ class LocalReader:
     def request(self, method, target, extra=None):
         self.sequence += 1
         headers = {'CSeq': str(self.sequence), **(extra or {})}
+        from runtime_config import internal_rtsp_authorization
+        authorization = internal_rtsp_authorization()
+        if authorization:
+            headers['Authorization'] = authorization
         if self.session:
             headers['Session'] = self.session
         request = method + ' ' + target + ' RTSP/1.0\r\n'

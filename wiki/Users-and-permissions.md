@@ -46,7 +46,13 @@ Existing version 1/2 accounts migrate with their previous all-camera access. Thi
 
 Usernames, roles, random salts and scrypt verifiers are stored in the private `web-access.json` file in the server data volume or desktop data directory. No plaintext account password is stored by the interface. Sessions remain in server memory, expire after 12 hours and do not survive restart. Account data is excluded from Git and Docker build contexts.
 
-These roles govern the web interface and its API, including integrated playback. Direct RTSP connections such as VLC do not use these web accounts: retain the default localhost binding or protect RTSP separately on a trusted network/VPN. Video and AI processing remain local. See [Network and privacy](Network-and-privacy).
+## VLC and direct RTSP (0.5.0)
+
+VLC uses the same Tuya Local username/password and camera grants as integrated playback. Open the camera's normal HD/SD RTSP URL and enter your Tuya Local credentials when prompted. Prefer RTSP over TCP. Do not add passwords to shared links or playlists.
+
+Anonymous RTSP is disabled, including on localhost. Configure the first administrator in Tuya Local settings before connecting VLC. A viewer can only access assigned cameras and cannot use the audio backchannel. Changing the path or adding AI query parameters does not bypass authorization. Account deletion or a password, role or camera-grant change closes existing RTSP connections, normally within one second (up to three seconds if the authorization service stops responding). A stopped authorization service denies new connections.
+
+The integrated viewer, local AI and settings wake-up use a separate ephemeral internal credential, never a localhost exemption. Internal media connections stay on loopback. Video and AI processing remain local. RTSP uses Basic authentication for compatibility with existing password verifiers and VLC; this does not encrypt credentials or video. Keep the localhost default or use a trusted local network/VPN. See [Network and privacy](Network-and-privacy).
 
 ![Administrator user management with synthetic accounts](https://raw.githubusercontent.com/timiliris/tuya-local/main/wiki/images/users.png)
 

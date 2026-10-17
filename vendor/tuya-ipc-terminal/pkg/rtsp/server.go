@@ -18,18 +18,24 @@ import (
 )
 
 type RTSPServer struct {
-	port           int
-	listener       net.Listener
-	storageManager *storage.StorageManager
-	clients        map[string]*RTSPClient
-	streams        map[string]*CameraStream
-	mutex          sync.RWMutex
-	ctx            context.Context
-	cancel         context.CancelFunc
-	running        bool
+	connectionSlots chan struct{}
+	authorizer      *rtspAuthorizer
+	port            int
+	listener        net.Listener
+	storageManager  *storage.StorageManager
+	clients         map[string]*RTSPClient
+	streams         map[string]*CameraStream
+	mutex           sync.RWMutex
+	ctx             context.Context
+	cancel          context.CancelFunc
+	running         bool
 }
 
 type RTSPClient struct {
+	requestPath          string
+	authTicket           string
+	authInternal         bool
+	authAdmin            bool
 	passive              bool
 	conn                 net.Conn
 	session              string
@@ -85,17 +91,22 @@ func NewRTSPServer(port int, storageManager *storage.StorageManager) *RTSPServer
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &RTSPServer{
-		port:           port,
-		storageManager: storageManager,
-		clients:        make(map[string]*RTSPClient),
-		streams:        make(map[string]*CameraStream),
-		ctx:            ctx,
-		cancel:         cancel,
-		running:        false,
+		connectionSlots: make(chan struct{}, 64),
+		authorizer:      newRTSPAuthorizer(),
+		port:            port,
+		storageManager:  storageManager,
+		clients:         make(map[string]*RTSPClient),
+		streams:         make(map[string]*CameraStream),
+		ctx:             ctx,
+		cancel:          cancel,
+		running:         false,
 	}
 }
 
 func (s *RTSPServer) Start() error {
+	if !s.authorizer.configured() {
+		return errMissingRTSPAuthorization
+	}
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -212,8 +223,12 @@ func (s *RTSPServer) acceptConnections() {
 				continue
 			}
 
-			// Handle connection in goroutine
-			go s.handleConnection(conn)
+			select {
+			case s.connectionSlots <- struct{}{}:
+				go func() { defer func() { <-s.connectionSlots }(); s.handleConnection(conn) }()
+			default:
+				_ = conn.Close()
+			}
 		}
 	}
 }
@@ -226,13 +241,36 @@ func (s *RTSPServer) handleConnection(conn net.Conn) {
 
 	reader := bufio.NewReader(conn)
 
-	// Parse initial RTSP request
-	request, err := s.parseRTSPRequestFromReader(reader)
-	if err != nil {
-		core.Logger.Error().Err(err).Msg("Error parsing initial RTSP request")
+	_ = conn.SetReadDeadline(time.Now().Add(15 * time.Second))
+	var request *RTSPRequest
+	var grant rtspGrant
+	var err error
+	for attempts := 0; attempts < 8; attempts++ {
+		request, err = s.parseRTSPRequestFromReader(reader)
+		if err != nil {
+			return
+		}
+		host, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
+		grant = s.authorizer.check(authHeader(request), grant.Ticket, "", host)
+		if !grant.Allowed {
+			authChallenge(conn, request)
+			continue
+		}
+		if request.Method == "OPTIONS" {
+			_ = sendRTSPResponse(conn, 200, "OK", map[string]string{"CSeq": fmt.Sprint(request.CSeq), "Public": "OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN"}, "")
+			continue
+		}
+		break
+	}
+	if request == nil || !grant.Allowed || request.Method == "OPTIONS" {
 		return
 	}
 
+	parsedRequest, parseErr := url.Parse(request.URL)
+	if parseErr != nil || parsedRequest.User != nil || parsedRequest.Fragment != "" || parsedRequest.Scheme != "rtsp" || (request.Method != "DESCRIBE" && request.Method != "SETUP" && request.Method != "PLAY") {
+		_ = sendRTSPResponse(conn, 400, "Bad Request", map[string]string{"CSeq": fmt.Sprint(request.CSeq)}, "")
+		return
+	}
 	// Extract camera path from URL
 	cameraPath, streamResolution := extractCameraPath(request.URL)
 	if cameraPath == "" {
@@ -255,6 +293,11 @@ func (s *RTSPServer) handleConnection(conn net.Conn) {
 		return
 	}
 
+	grant = s.authorizer.check("", grant.Ticket, camera.DeviceID, "")
+	if !grant.Allowed {
+		_ = sendRTSPResponse(conn, 403, "Forbidden", map[string]string{"CSeq": fmt.Sprint(request.CSeq)}, "")
+		return
+	}
 	core.Logger.Info().Msgf("New RTSP connection for camera: %s (%s)", camera.DeviceName, camera.DeviceID)
 
 	// AI observers never start or retain a battery camera session.
@@ -262,6 +305,10 @@ func (s *RTSPServer) handleConnection(conn net.Conn) {
 	aiMode := parsed.Query().Get("ai")
 	passive := aiMode == "passive"
 	if aiMode != "" {
+		if !grant.Internal {
+			sendRTSPResponse(conn, 403, "Forbidden", nil, "")
+			return
+		}
 		host, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
 		if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
 			sendRTSPResponse(conn, 403, "Forbidden", nil, "")
@@ -290,6 +337,10 @@ func (s *RTSPServer) handleConnection(conn net.Conn) {
 
 	// Create RTSP client
 	client := &RTSPClient{
+		requestPath:         parsedRequest.Path,
+		authTicket:          grant.Ticket,
+		authInternal:        grant.Internal,
+		authAdmin:           grant.Admin,
 		passive:             passive,
 		conn:                conn,
 		reader:              reader,
@@ -318,8 +369,14 @@ func (s *RTSPServer) handleConnection(conn net.Conn) {
 		stream.AddClient(client)
 	}
 
-	// Handle initial request
-	s.handleRTSPMethod(client, request)
+	ctx, cancel := context.WithCancel(s.ctx)
+	defer cancel()
+	go s.watchAuthorization(ctx, client)
+	// Handle initial request.
+	if s.handleRTSPMethod(client, request) {
+		s.removeClient(client.session)
+		return
+	}
 
 	// Handle further requests
 	s.handleRTSPProtocol(client)

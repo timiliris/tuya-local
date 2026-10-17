@@ -1,0 +1,96 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate version and changelog
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          git merge-base --is-ancestor HEAD origin/main
+          python scripts/release.py notes "$RELEASE_TAG" --output release-notes.md
+  checks:
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+  desktop:
+    needs: checks
+    uses: ./.github/workflows/desktop.yml
+  docker:
+    needs: [checks, desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Container names
+        id: image
+        env:
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          image="ghcr.io/${REPOSITORY,,}"
+          echo "tags=$image:$RELEASE_TAG,$image:latest" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.image.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=Local-first Tuya and LSC camera server with RTSP/WebRTC and local AI
+            org.opencontainers.image.licenses=MIT
+          provenance: true
+          sbom: true
+  publish:
+    needs: [desktop, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tuya-local-*
+          path: installers
+      - name: Prepare notes and checksums
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python scripts/release.py notes "$RELEASE_TAG" --output release-notes.md
+          python scripts/release.py assets installers --output release-assets
+      - name: Publish release after all builds succeed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo 'This release already exists; published assets are immutable.' >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" release-assets/* --verify-tag --title "Tuya Local $RELEASE_TAG" --notes-file release-notes.md

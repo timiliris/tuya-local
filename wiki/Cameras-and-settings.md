@@ -2,7 +2,7 @@
 
 ## Playback
 
-The viewer prefers local WebRTC. When the browser cannot decode H.265 HD, local H.264 conversion provides a fallback. SD uses fewer resources. VLC can open each camera's HD/SD RTSP URL; prefer RTSP over TCP.
+The viewer prefers local WebRTC. When the browser cannot decode H.265 HD, local H.264 conversion provides a fallback. SD uses fewer resources. VLC can open each camera's HD/SD RTSP URL; prefer RTSP over TCP and sign in with a Tuya Local account authorized for that camera.
 
 ## Sentinel display
 

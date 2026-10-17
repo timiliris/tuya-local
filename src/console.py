@@ -55,6 +55,8 @@ def playback_url(state: dict, device: str, quality: str) -> str:
 
 
 def ffmpeg_command(url: str) -> list[str]:
+    from runtime_config import internal_rtsp_url
+    url = internal_rtsp_url(url)
     return ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-rtsp_transport', 'tcp',
             '-timeout', '110000000', '-allowed_media_types', 'video',
             '-analyzeduration', '1000000', '-probesize', '1000000', '-i', url, '-map', '0:v:0', '-an',
@@ -439,6 +441,9 @@ def main(stop_event=None):
         os.umask(0o077)
     from paths import tuya_data
     security = Security(tuya_data() / "web-access.json")
+    from console_rtsp_auth import RTSPAuthorization
+    rtsp_auth = RTSPAuthorization(security)
+    rtsp_auth.start()
     from console_runtime import Runtime
     runtime = Runtime()
     runtime.start()
@@ -473,6 +478,7 @@ def main(stop_event=None):
         server.server_close()
         service.workers.stop()
         runtime.stop()
+        rtsp_auth.stop()
 
 
 if __name__ == '__main__':

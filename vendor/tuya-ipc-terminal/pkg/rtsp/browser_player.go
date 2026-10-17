@@ -162,7 +162,7 @@ func browserAPI(codec webrtc.RTPCodecCapability) (*webrtc.API, func(), error) {
 }
 
 func browserRemuxCommand(ctx context.Context, source, description string, port int) *exec.Cmd {
-	return exec.CommandContext(ctx, "ffmpeg", "-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp", "-timeout", "110000000", "-allowed_media_types", "video", "-analyzeduration", "1000000", "-probesize", "1000000", "-i", source, "-map", "0:v:0", "-an", "-c:v", "copy", "-payload_type", "96", "-sdp_file", description, "-f", "rtp", "rtp://127.0.0.1:"+strconv.Itoa(port)+"?pkt_size=1200")
+	return exec.CommandContext(ctx, "ffmpeg", "-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp", "-timeout", "110000000", "-allowed_media_types", "video", "-analyzeduration", "1000000", "-probesize", "1000000", "-i", internalRTSPURL(source), "-map", "0:v:0", "-an", "-c:v", "copy", "-payload_type", "96", "-sdp_file", description, "-f", "rtp", "rtp://127.0.0.1:"+strconv.Itoa(port)+"?pkt_size=1200")
 }
 
 // RunBrowserPlayer remuxes camera RTP into a local, encrypted browser peer.

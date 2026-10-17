@@ -6,6 +6,7 @@ on:
   pull_request:
     paths: ['desktop/**','scripts/**','src/**','web/**','vendor/**','requirements.txt','.github/workflows/desktop.yml']
   workflow_dispatch:
+  workflow_call:
 permissions:
   contents: read
 jobs:

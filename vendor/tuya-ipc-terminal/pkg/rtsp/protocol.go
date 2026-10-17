@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/textproto"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -67,17 +67,6 @@ func sendRTSPResponse(conn net.Conn, statusCode int, status string, headers map[
 	}
 
 	responseStr := response.String()
-
-	fmt.Println()
-	core.Logger.Trace().Msgf("Sending RTSP response:")
-	re := regexp.MustCompile(`\r\n|\r|\n`)
-	lines := re.Split(responseStr, -1)
-	for _, line := range lines {
-		if line != "" {
-			fmt.Println(line)
-		}
-	}
-	fmt.Println()
 
 	_, err := conn.Write([]byte(responseStr))
 	return err
@@ -176,6 +165,11 @@ func (s *RTSPServer) handleInterleavedRTP(client *RTSPClient) error {
 		return fmt.Errorf("failed to read RTP data: %v", err)
 	}
 
+	// Read-only viewers may send RTCP receiver reports, but never talk audio.
+	if !client.authAdmin {
+		return nil
+	}
+
 	// Check if this is backchannel
 	if channel == client.backAudioRTPChannel {
 		// Parse und forward backchannel packet
@@ -197,14 +191,14 @@ func (s *RTSPServer) handleInterleavedRTP(client *RTSPClient) error {
 
 func (s *RTSPServer) parseRTSPRequestFromReader(reader *bufio.Reader) (*RTSPRequest, error) {
 	// Read request line
-	line, _, err := reader.ReadLine()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read request line: %v", err)
+	line, truncated, err := reader.ReadLine()
+	if err != nil || truncated {
+		return nil, fmt.Errorf("failed to read request line")
 	}
 
 	parts := strings.Split(string(line), " ")
 	if len(parts) != 3 {
-		return nil, fmt.Errorf("invalid request line: %s", string(line))
+		return nil, fmt.Errorf("invalid RTSP request line")
 	}
 
 	request := &RTSPRequest{
@@ -215,10 +209,10 @@ func (s *RTSPServer) parseRTSPRequestFromReader(reader *bufio.Reader) (*RTSPRequ
 	}
 
 	// Read headers
-	for {
-		line, _, err := reader.ReadLine()
-		if err != nil {
-			return nil, fmt.Errorf("failed to read header: %v", err)
+	for count := 0; ; count++ {
+		line, truncated, err := reader.ReadLine()
+		if err != nil || truncated || count >= 128 {
+			return nil, fmt.Errorf("invalid RTSP headers")
 		}
 
 		lineStr := string(line)
@@ -232,7 +226,10 @@ func (s *RTSPServer) parseRTSPRequestFromReader(reader *bufio.Reader) (*RTSPRequ
 			continue
 		}
 
-		key := strings.TrimSpace(lineStr[:colonIndex])
+		key := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(lineStr[:colonIndex]))
+		if _, exists := request.Headers[key]; exists {
+			return nil, fmt.Errorf("duplicate RTSP header")
+		}
 		value := strings.TrimSpace(lineStr[colonIndex+1:])
 		request.Headers[key] = value
 
@@ -244,18 +241,19 @@ func (s *RTSPServer) parseRTSPRequestFromReader(reader *bufio.Reader) (*RTSPRequ
 		}
 	}
 
-	fmt.Println()
-	core.Logger.Trace().Msg("Received RTSP request:")
-	fmt.Printf("%s %s %s\n", request.Method, request.URL, request.Version)
-	for key, value := range request.Headers {
-		fmt.Printf("%s: %s\n", key, value)
-	}
-	fmt.Println()
+	// Credentials and credential-bearing URLs must never enter logs.
 
 	return request, nil
 }
 
 func (s *RTSPServer) handleRTSPMethod(client *RTSPClient, request *RTSPRequest) bool {
+	if client.authTicket != "" {
+		grant := s.authorizer.check("", client.authTicket, client.stream.camera.DeviceID, "")
+		if !grant.Allowed || !requestWithinCamera(client, request) || (!grant.Admin && strings.Contains(request.URL, "/backchannel")) {
+			_ = sendRTSPResponse(client.conn, 403, "Forbidden", map[string]string{"CSeq": strconv.Itoa(request.CSeq)}, "")
+			return true
+		}
+	}
 	close := false
 
 	switch request.Method {

@@ -29,6 +29,8 @@ def effective_mode(camera, config):
 
 
 def command(url):
+    from runtime_config import internal_rtsp_url
+    url = internal_rtsp_url(url)
     return ['ffmpeg','-hide_banner','-loglevel','error','-rtsp_transport','tcp',
             '-timeout','110000000','-allowed_media_types','video','-threads','1',
             '-i',url,'-map','0:v:0','-an','-vf',"fps=1,scale=640:640:force_original_aspect_ratio=decrease",

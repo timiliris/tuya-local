@@ -1,5 +1,7 @@
 # Tuya Local
 
+[![CI](https://github.com/timiliris/tuya-local/actions/workflows/ci.yml/badge.svg)](https://github.com/timiliris/tuya-local/actions/workflows/ci.yml) [![Release](https://github.com/timiliris/tuya-local/actions/workflows/release.yml/badge.svg)](https://github.com/timiliris/tuya-local/releases)
+
 <img src="desktop/icon.svg" width="88" height="88" alt="Tuya Local logo">
 
 A local camera server and **Tauri v2 desktop application** for macOS, Windows and Linux. Docker and desktop share one corrected media engine and one interface.
@@ -9,6 +11,7 @@ A local camera server and **Tauri v2 desktop application** for macOS, Windows an
 - Automatic wake-up, camera settings, themes and sentinel display.
 - Optional local AI per camera, battery protection and event history.
 - Local administrator and read-only accounts, with per-camera permissions enforced by the server.
+- Authenticated RTSP for VLC using the same accounts and camera permissions.
 - French, English, Dutch, German and Spanish interface.
 
 ![Tuya Local dashboard in dark mode](wiki/images/dashboard-dark.png)
@@ -36,3 +39,7 @@ Wiki sources live in `wiki/`. Old guides, translations and installers are preser
 Video and AI inference stay local; account login, signaling, wake-up and some commands still use Tuya. Manage local administrator and read-only accounts in **Server settings**, without editing configuration files. Existing single passwords migrate to the `admin` account. Localhost access remains the default. See [security and access](https://github.com/timiliris/tuya-local/wiki/Network-and-privacy) before enabling LAN access.
 
 Account sessions, device keys and private thumbnails are excluded from this repository. Based on [DanEng1982/tuya-rtsp-bridge](https://github.com/DanEng1982/tuya-rtsp-bridge), with the [seydx/tuya-ipc-terminal](https://github.com/seydx/tuya-ipc-terminal) engine. Required licenses and attributions: [LICENSE](LICENSE), [NOTICE.md](NOTICE.md).
+
+## Releases and changelog
+
+Download native packages from [GitHub Releases](https://github.com/timiliris/tuya-local/releases), verify them against the attached `SHA256SUMS`, and read the [English changelog](CHANGELOG.md) before upgrading. Tagged releases also publish `ghcr.io/timiliris/tuya-local:<tag>` for Docker. Desktop packages are currently unsigned. See the [release process](https://github.com/timiliris/tuya-local/wiki/Development#releases).

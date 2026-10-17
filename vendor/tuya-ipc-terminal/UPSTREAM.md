@@ -42,3 +42,5 @@ Then merge/rebase and restore the three files if they conflict.
 ## Additional Tuya Local changes
 
 The standalone fork adds bounded low-power wake/offer/HD retries, cached capability preservation, legacy HEVC RTP normalization, first-video readiness and failed-session cleanup. It rejects public/TURN camera media routes. `browser-player` forwards local RTSP RTP to a browser peer over local ICE-TCP without transcoding; unsupported browser codecs use the Python console's local FFmpeg fallback. Public mobile-signaling experiments remain disabled by default. Tests cover wake lifecycle, local media policy, codec normalization and browser negotiation.
+
+- RTSP access delegates to the private Tuya Local account broker, enforces per-camera grants before creating a stream, binds subsequent requests to that camera, and revokes active connections. Internal readers authenticate explicitly; RTSP request/response dumps were removed to protect credentials.
