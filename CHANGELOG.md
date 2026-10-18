@@ -4,6 +4,9 @@ Changes to Tuya Local are recorded here in English. Version tags follow Semantic
 
 ## [Unreleased]
 
+### Fixed
+- Normalize installer filenames before upload so SHA256SUMS matches GitHub download names; reject collisions after normalization.
+
 ## [0.5.0] - 2026-10-18
 
 ### Security

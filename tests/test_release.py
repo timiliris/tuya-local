@@ -29,6 +29,24 @@ class ReleaseTests(unittest.TestCase):
             (source / 'demo.dmg').unlink()
             with self.assertRaises(ValueError): release.assets(source, root / 'missing')
 
+    def test_names_match_github_downloads_and_checksum_entries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); source = root / 'source'; source.mkdir()
+            for name in ('Tuya Local.dmg', 'Tuya Local.msi', 'Tuya Local.AppImage'):
+                (source / name).write_bytes(b'synthetic')
+            release.assets(source, root / 'out')
+            self.assertEqual({path.name for path in (root / 'out').iterdir()}, {'Tuya.Local.dmg', 'Tuya.Local.msi', 'Tuya.Local.AppImage', 'SHA256SUMS'})
+            for line in (root / 'out/SHA256SUMS').read_text().splitlines():
+                digest, name = line.split('  ', 1)
+                self.assertEqual(hashlib.sha256((root / 'out' / name).read_bytes()).hexdigest(), digest)
+
+    def test_name_normalization_cannot_overwrite_another_installer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); source = root / 'source'; source.mkdir()
+            for name in ('Tuya Local.dmg', 'Tuya.Local.dmg', 'demo.msi', 'demo.AppImage'):
+                (source / name).touch()
+            with self.assertRaises(ValueError): release.assets(source, root / 'out')
+
     def test_duplicate_names_or_symlinks_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); source = root / 'source'; source.mkdir()

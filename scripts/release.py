@@ -36,12 +36,15 @@ def assets(source, destination):
         raise ValueError('Symlinks are not release assets')
     if not all(any(path.suffix in group for path in files) for group in ({'.dmg'}, {'.msi', '.exe'}, {'.deb', '.rpm', '.AppImage'})):
         raise ValueError('A native installer is required for each of macOS, Windows and Linux')
-    if len({path.name for path in files}) != len(files):
-        raise ValueError('Duplicate installer names')
+    names = {path: re.sub(r'[^A-Za-z0-9_.-]', '.', path.name) for path in files}
+    if any(not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', name) for name in names.values()):
+        raise ValueError('Invalid installer name')
+    if len(set(names.values())) != len(files):
+        raise ValueError('Duplicate installer names after normalization')
     destination.mkdir(parents=True, exist_ok=False)
     checksums = []
     for path in files:
-        target = destination / path.name
+        target = destination / names[path]
         shutil.copyfile(path, target)
         with target.open('rb') as stream:
             digest = hashlib.file_digest(stream, 'sha256').hexdigest()
